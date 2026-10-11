@@ -1,0 +1,299 @@
+In this folder, some part of it is implemented already, follow this implementation part, and  finish off the work. Implementation Plan: Founder Radar
+A production-grade, AI-powered founder discovery and research platform built in the new directory C:\Users\cheta\neat\founder-radar-next. The original project in C:\Users\cheta\neat\founder remains completely untouched.
+
+1. Integration Inventory & Current State Verification
+During Phase 1 inspection, the existing working components were tested and confirmed:
+
+Integration	Endpoint / Identifier	Status	Notes
+Crustdata People Search	https://api.crustdata.com/person/search
+x-api-version: 2025-11-01	Verified Working	Successfully returned candidate profiles with employment history and cursor pagination.
+LiteLLM Gateway	https://litellm.vision.aivar.app	Verified Working	Connected to LiteLLM gateway with model claude-sonnet-4.6.
+Claude Model	claude-sonnet-4.6	Verified Working	Verified completion test output: "Founder Radar is connected."
+Neatlogs SDK	Ingestion via OTLP/HTTP
+SDK version: 1.4.26	Verified Working	doctor --local --json (PASS)
+doctor --probe --json (PASS — finalized, readback verified).
+Entire CLI	Version: 0.11.4 (Windows AMD64)	Installed & Verified	Installed at ~/.local/bin/entire.exe. Supports antigravity agent integration.
+cfo.ai	N/A	Deferred	Completely deferred per master instructions. Clean placeholder UI ("Financial Diligence — Coming Soon").
+2. Architecture & File Layout
+The new project will be created entirely inside C:\Users\cheta\neat\founder-radar-next:
+
+text
+
+C:\Users\cheta\neat\founder-radar-next\
+├── backend\
+│   ├── .env.example
+│   ├── .gitignore
+│   ├── requirements.txt
+│   ├── app\
+│   │   ├── __init__.py
+│   │   ├── main.py
+│   │   ├── config.py
+│   │   ├── api\
+│   │   │   ├── __init__.py
+│   │   │   ├── health.py
+│   │   │   ├── search.py
+│   │   │   ├── profiles.py
+│   │   │   ├── research.py
+│   │   │   ├── compare.py
+│   │   │   └── saved.py
+│   │   ├── models\
+│   │   │   ├── schemas.py
+│   │   │   └── database.py
+│   │   ├── services\
+│   │   │   ├── crustdata_service.py
+│   │   │   ├── ai_service.py
+│   │   │   └── founder_service.py
+│   │   ├── repositories\
+│   │   │   └── saved_repository.py
+│   │   └── observability\
+│   │       └── tracer.py
+│   └── tests\
+│       ├── test_health.py
+│       ├── test_crustdata_service.py
+│       ├── test_ai_service.py
+│       ├── test_api_endpoints.py
+│       └── test_neatlogs_instrumentation.py
+├── frontend\
+│   ├── package.json
+│   ├── vite.config.ts
+│   ├── tsconfig.json
+│   ├── tailwind.config.js
+│   ├── index.html
+│   └── src\
+│       ├── main.tsx
+│       ├── App.tsx
+│       ├── index.css
+│       ├── types\
+│       │   └── index.ts
+│       ├── services\
+│       │   └── api.ts
+│       ├── components\
+│       │   ├── Navbar.tsx
+│       │   ├── Sidebar.tsx
+│       │   ├── FounderCard.tsx
+│       │   ├── MatchBadge.tsx
+│       │   ├── SkeletonCard.tsx
+│       │   ├── EmptyState.tsx
+│       │   ├── Toast.tsx
+│       │   └── ComingSoonModal.tsx
+│       ├── pages\
+│       │   ├── LandingPage.tsx
+│       │   ├── DashboardOverview.tsx
+│       │   ├── DiscoverPage.tsx
+│       │   ├── ProfileDetailPage.tsx
+│       │   ├── ComparePage.tsx
+│       │   ├── SavedFoundersPage.tsx
+│       │   └── ResearchPage.tsx
+│       └── hooks\
+│           └── useSavedFounders.ts
+├── .entire\
+├── README.md
+└── WORKFLOW_REVIEWER.md
+3. Detailed Component Plan
+Backend (FastAPI + Pydantic + SQLite + Neatlogs)
+Config & Environment:
+Securely read CRUSTDATA_API_KEY, LITELLM_API_KEY, LITELLM_BASE_URL, LITELLM_MODEL, NEATLOGS_API_KEY from .env.
+Never expose credentials via API or frontend. Provide .env.example with blank placeholders.
+Observability (observability/tracer.py):
+Initialize Neatlogs once (workflow_name="founder-radar", instrumentations=["litellm"]).
+Create custom span context managers for end-to-end tracing: founder_search, crustdata_fetch, profile_normalization, ai_analysis, candidate_compare.
+Crustdata Integration (services/crustdata_service.py):
+Queries https://api.crustdata.com/person/search with header x-api-version: 2025-11-01.
+Translates search filters (company/previous employer, title, location) into Crustdata AST filter conditions.
+Robust normalization of employment history (current roles, past roles, dates, company names).
+In-memory cache layer to prevent redundant upstream API requests.
+AI Research & Synthesis (services/ai_service.py):
+Reusable prompt templates for:
+Profile research synthesis & transition verification (differentiating facts vs inferences).
+Search relevance explanation (e.g. why they match "ex-Stripe recent founder").
+Candidate side-by-side comparison.
+Personalized outreach drafting with tone presets.
+Enforce structured JSON outputs and schema validation.
+Persistence (repositories/saved_repository.py):
+Local SQLite database (founder_radar.db) storing:
+Saved founders & tags.
+Search history & recent searches.
+Saved comparisons.
+API Endpoints:
+GET /health — backend health & integration statuses.
+POST /api/search — search & discovery with filter parameters.
+GET /api/profiles/{id} — detailed profile retrieval & enriched timeline.
+POST /api/research — deep AI analysis & outreach draft generation.
+POST /api/compare — side-by-side comparison of 2-4 profiles.
+GET/POST/DELETE /api/saved — saved founder watchlist management.
+Frontend (React + TypeScript + Tailwind + Framer Motion + Lucide)
+Design System & Theme:
+Premium SaaS dark aesthetic (slate/zinc with emerald & cyan accents, subtle glassmorphism borders, luminous badges).
+Micro-interactions, skeleton loaders, animated tabs, smooth page transitions with Framer Motion.
+Landing Page:
+Engaging hero: "Discover the Next Wave of Founders Before the Noise".
+Live interactive preview with sample ex-Stripe founder discovery.
+Feature highlights: Career Timeline Reconstruction, Verified Transition Signals, Grounded AI Synthesis, Observability.
+Navigation links directly into the Application Dashboard.
+Application Dashboard & Navigation:
+Collapsible sidebar + top navigation with global search.
+Sections: Overview, Discover Founders, Profile Dossier, Compare Founders, Saved Watchlist, Deep Research, Financial Diligence (labeled "Coming Soon").
+Discover Founders:
+Rich filter bar: Company/Previous Employer (e.g., Stripe, Google, Meta), Role/Title, Location, Transition Timing.
+Preset chips (e.g., "Ex-Stripe Founders", "Recent AI Transitions", "Seed Stage Builders").
+Result cards with match explanations, transition status badge (verified, unverified, insufficient_evidence), career progression snippet, and quick actions (Save, Compare, Deep Dive).
+Profile Dossier:
+Career timeline breakdown.
+AI Research Dossier with grounded citations and flagged data gaps.
+Editable, human-in-the-loop Outreach Generator.
+Candidate Comparison:
+Side-by-side matrix comparing previous companies, years to foundership, domain signals, and fit analysis.
+4. Neatlogs Tracing Verification Plan
+Ensure initialization is executed at application start before LiteLLM calls.
+Verify with:
+python -m neatlogs doctor --local --json (Network-free check)
+python -m neatlogs doctor --probe --json (Live ingestion & readback check)
+Execute a live search in the new backend, verify the root trace and nested spans are exported to the Neatlogs dashboard.
+5. Entire Developer Workflow Plan
+Enable Entire in C:\Users\cheta\neat\founder-radar-next:
+Initialize git locally (local-only, no remote created).
+Run entire enable --agent antigravity.
+Implement Founder Radar Architecture & Requirement Drift Reviewer:
+A dedicated diagnostic module & workflow script (WORKFLOW_REVIEWER.md + reviewer script).
+Validates code changes against project requirements:
+Integration safety & credential leakage prevention.
+Factual grounding check (ensuring AI responses separate evidence from hypotheses).
+Test coverage & test evidence verification.
+Architectural dependency isolation (confirming zero runtime imports from old directory).
+Inspect and verify local Entire checkpoints using entire checkpoint list and entire checkpoint explain HEAD.
+6. Verification & Automated Testing Plan
+Automated Backend Tests
+pytest tests/test_health.py: Health endpoint and configuration.
+pytest tests/test_crustdata_service.py: Crustdata API payload generation, mock response normalization, error recovery.
+pytest tests/test_ai_service.py: LiteLLM response validation, JSON parsing, prompt escaping, mock completion tests.
+pytest tests/test_api_endpoints.py: All FastAPI endpoints (search, profiles, compare, saved).
+pytest tests/test_neatlogs_instrumentation.py: Custom span creation and tracer initialization.
+Automated Frontend Tests & Build
+npm.cmd run typecheck: TypeScript typechecking without errors.
+npm.cmd run build: Production bundle compilation.
+Manual Verification
+Start FastAPI on http://127.0.0.1:8000.
+Start Vite dev server on http://localhost:5173.
+Execute search for "Ex-Stripe founders".
+View detailed profile, generate outreach draft, save to watchlist, compare candidates.
+Confirm trace visible in Neatlogs.
+User Review Required
+IMPORTANT
+
+The new application will be completely created and contained in C:\Users\cheta\neat\founder-radar-next. The original folder C:\Users\cheta\neat\founder remains completely unchanged and read-only. No GitHub repository will be created or pushed until you grant explicit permission. All Entire checkpoints will be kept local. FOUNDER RADAR — FINAL PRODUCT REQUIREMENTS
+Product positioning
+Build Founder Radar as a global founder intelligence platform.
+Product promise: Discover founders, understand their professional journeys, investigate relevant signals, and organize research in one workspace.
+The platform should support a broad range of founder research use cases across countries, industries, company stages, and professional backgrounds. Do not optimize the entire product for VCs, sales teams, one geography, or one industry.
+1. Core product workflow
+A. Discover founders
+Build a polished discovery experience using the existing Crustdata People Search API.
+Support available filters such as:
+Current or previous employer.
+Current or previous role.
+Location and country.
+Professional background.
+Career history and relevant transitions.
+Recent job changes, where supported.
+Other useful filters supported by the configured API.
+Include a natural-language search entry point, filter controls, saved searches, pagination where supported, and clear loading, error, and empty states.
+Natural-language searches must be translated into supported API queries or transparent post-processing. Do not claim that unsupported filters work.
+B. Founder intelligence dossiers
+Each profile must have a detailed research view containing:
+Professional profile information.
+Career timeline based on available employment history.
+Current and previous roles and employers.
+Relevant founder indicators.
+Source links and evidence where available.
+AI-generated research summary.
+Explanation of why the profile matches the search.
+Missing information and suggested verification steps.
+Editable research notes.
+Save-to-watchlist action.
+Outreach draft generation.
+Clearly separate source-backed facts from AI-generated interpretations.
+C. Career signals and founder discovery intelligence
+Identify potentially relevant founder indicators and career transitions using available profile data.
+Support useful discovery patterns such as:
+People with previous experience at a target company who now hold founder roles.
+People with recent job changes and relevant founder indicators.
+People whose available professional profiles indicate a possible new venture.
+Founders in particular locations, industries, or professional domains.
+Use actual employment dates, titles, and other available evidence.
+Classify important conclusions transparently as verified, unverified, or insufficient evidence. These classifications must follow explicit rules based on the available data.
+Never infer that someone is launching a startup solely because they left an employer or have a missing current role.
+D. Saved founders and watchlists
+Implement persistent storage for:
+Saved founders.
+User-created watchlists.
+Research notes.
+Recent searches.
+Relevant profile metadata.
+Users should be able to save, remove, organize, and revisit profiles.
+Do not implement automatic monitoring or claim that a profile has changed unless the application has genuinely retrieved and compared updated data.
+E. AI research and outreach
+Use Claude through the existing LiteLLM gateway for:
+Founder research summaries.
+Search relevance explanations.
+Career-history synthesis.
+Missing-evidence identification.
+Suggested follow-up research questions.
+Personalized outreach drafts.
+Use reusable prompts, sensible timeouts, output validation, and graceful error handling.
+Keep generated outreach editable. Do not automatically send external communications.
+2. Required frontend content
+Build a cohesive, premium SaaS application which includes this
+Landing Page — Product positioning, visual product preview, feature explanations, and a CTA into the app.
+Overview — Recent searches, saved founders, watchlists, and useful activity summaries based on actual stored data.
+Discover — Search input, filters, founder result cards, pagination, and search states.
+Founder Profile — Detailed dossier, career timeline, evidence, AI summary, research notes, and outreach drafting.
+Watchlists — Saved founders organized by user-created lists.
+Research Workspace — Research summaries, verification questions, and editable outreach drafts.
+Settings / Integrations — Local application configuration status and integration health, without exposing secrets.
+DOnt clutter everthing , keep everything clean and take references of poular ai saas if required for design undertsandings.Do not create a founder comparison page, comparison buttons, comparison API, comparison-specific AI prompts, comparison persistence, or comparison tests.
+3. Design requirements
+Use React, TypeScript, Vite, Tailwind CSS, and Motion or Framer Motion.
+Build a premium, responsive SaaS experience with:
+A coherent design system.
+Strong typography and visual hierarchy.
+Refined cards, panels, filters, and profile timelines.
+Smooth page transitions and purposeful micro-interactions.
+Loading skeletons and informative empty/error states.
+Accessible keyboard interactions and focus states.
+Consistent behavior across desktop, tablet, and mobile.
+The application must be functional, not just a visual mockup. Every visible control must work or be clearly marked as coming soon.
+4. Integration requirements
+Crustdata
+Reuse the existing working API configuration, credentials, request format, and response handling. Validate available filters against the actual API behavior.
+Claude via LiteLLM
+Reuse the existing gateway and exact model identifier. Do not switch providers or hardcode secrets.
+Neatlogs
+Reuse the existing API key and project configuration. Instrument real search and AI workflows, then verify actual trace export.
+Entire
+Use Entire as developer and hackathon tooling. Connect the local project to the existing GitHub repository:
+[https://github.com/chetan28097/founder-radar-next](https://github.com/chetan28097/founder-radar-next)
+First inspect the existing local Git state and remote configuration. Preserve existing history. Never force-push, discard local changes, overwrite remote history, or publish secrets.
+Follow the official supported Antigravity integration and checkpoint workflow. Verify actual checkpoints and document any remaining submission requirements.
+cfo.ai
+Do not build the actual API/MCP integration, require credentials, or fabricate financial data. We will configure it later.(make neccesary arrangements to confgiure it later)
+5. Explicitly excluded features
+Do not implement:
+Founder comparison.
+Side-by-side comparison views or APIs.
+Automatic outreach or message sending.
+Unsupported real-time monitoring.
+Fabricated founder signals or financial information.
+Unnecessary authentication or multi-user infrastructure for the initial local version.
+6. Definition of done
+The product must:
+Run locally from the new project directory.
+Use real Crustdata results and the existing Claude/LiteLLM configuration.
+Provide working discovery, founder dossiers, saved founders, watchlists, research, and outreach drafting.
+Display evidence and uncertainty transparently.
+Have working Neatlogs instrumentation with verified trace export, or a documented blocker.
+Use Entire for the actual developer workflow and capture real checkpoint evidence where supported.
+Exclude founder comparison completely.
+Pass the relevant tests and production builds.
+Keep secrets out of source code and Git.
+Preserve the original project unchanged.
+Report actual implementation and verification results. Do not claim success for integrations or features that have not been tested.
