@@ -8,14 +8,22 @@ import os
 import sys
 import json
 import subprocess
+import shutil
 from pathlib import Path
+
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8")
 
 
 class DriftReviewer:
     def __init__(self, project_root: str):
         self.root = Path(project_root)
         self.findings = []
-        self.entire_cli_path = Path.home() / ".local" / "bin" / "entire.exe"
+        found_cli = shutil.which("entire")
+        if found_cli:
+            self.entire_cli_path = Path(found_cli)
+        else:
+            self.entire_cli_path = Path.home() / ".local" / "bin" / "entire.exe"
 
     def run_check(self, title: str, category: str, passed: bool, evidence: str, severity: str = "INFO", verification_step: str = "N/A"):
         status_label = "PASS" if passed else "FAIL"
@@ -32,7 +40,7 @@ class DriftReviewer:
         """Verify zero runtime imports or references to the original 'founder' directory."""
         forbidden_references = []
         for p in self.root.rglob("*.py"):
-            if ".venv" in str(p):
+            if ".venv" in str(p) or p.name == "workflow_reviewer.py":
                 continue
             content = p.read_text(encoding="utf-8", errors="ignore")
             if "from founder." in content or "import founder." in content:
@@ -79,7 +87,7 @@ class DriftReviewer:
         """Verify that explicitly excluded features (comparison, CFO.ai execution) are omitted."""
         comparison_found = []
         for p in self.root.rglob("*.py"):
-            if ".venv" in str(p):
+            if ".venv" in str(p) or p.name == "workflow_reviewer.py":
                 continue
             content = p.read_text(encoding="utf-8", errors="ignore")
             if "class Comparison" in content or "def compare_founders" in content:

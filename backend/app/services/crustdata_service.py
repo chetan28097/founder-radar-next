@@ -220,7 +220,8 @@ class CrustdataService:
         raw_profiles = data.get("profiles", [])
         total_count = data.get("total_count")
         next_cursor = data.get("next_cursor")
-        remarks = data.get("remarks")
+        raw_remarks = data.get("remarks")
+        remarks = ", ".join(str(r) for r in raw_remarks) if isinstance(raw_remarks, list) and raw_remarks else (str(raw_remarks) if raw_remarks else None)
 
         with trace_span("profile_normalization", raw_count=len(raw_profiles)):
             normalized_profiles = []

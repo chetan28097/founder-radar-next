@@ -50,7 +50,7 @@ class SearchResponse(BaseModel):
     next_cursor: Optional[str] = None
     applied_filters: Dict[str, Any] = {}
     query_interpretation: Optional[str] = None
-    remarks: Optional[str] = None
+    remarks: Optional[Any] = None
 
 
 class ProfileDossier(BaseModel):
