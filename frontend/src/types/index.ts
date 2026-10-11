@@ -67,6 +67,18 @@ export interface FounderProfile {
   data_completeness: number;
 }
 
+export type CandidateResult = FounderProfile;
+
+export interface SearchRequest {
+  query?: string;
+  employer?: string;
+  role?: string;
+  location?: string;
+  country?: string;
+  limit?: number;
+  cursor?: string;
+}
+
 export interface SearchResponse {
   count: number;
   total_count?: number;
