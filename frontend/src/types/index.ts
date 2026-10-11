@@ -1,27 +1,36 @@
 /**
  * ============================================================================
- * FOUNDER RADAR — CRUSTDATA CANDIDATE & INTELLIGENCE SCHEMA
+ * FOUNDER RADAR — CORE DATA SCHEMA CONTRACTS
  * ============================================================================
  *
- * This module defines the core data contracts for candidate discovery, career
- * timeline reconstruction, and AI research dossiers in Founder Radar.
+ * This module defines and exports the core TypeScript type contracts for the
+ * Founder Radar intelligence platform, spanning:
  *
- * UPSTREAM CRUSTDATA PEOPLE SEARCH API (v2025-11-01):
- * - Basic Profile: Full name, professional headline, current title, avatar, and
- *   structured geographic location (city, state, country).
- * - Employment History: Granular employment records partitioned into:
- *     * Current roles: Active venture/company, title, start dates.
- *     * Past roles: Previous employers (e.g. Stripe, Google), titles, start/end dates.
- * - Identity: Stable integer/string person identifiers (crustdata_person_id).
+ * 1. UPSTREAM INGESTION (Crustdata People Search API v2025-11-01):
+ *    - Basic Profile (identity, titles, locations, photos)
+ *    - Employment Details (partitioned current and past employment chronologies)
  *
- * NORMALIZED FOUNDER RADAR CANDIDATE SCHEMA:
- * - Deterministic Transition Engine: Enforces 3-tier factual verification:
- *     * 'verified': Confirmed tenure at previous employer with documented dates,
- *       followed sequentially by an active founder role with start date.
- *     * 'unverified': Plausible founder trajectory with partial/unverified timestamps.
- *     * 'insufficient_evidence': Missing chronology or insufficient evidence.
- * - Grounded Matching: Tracks target company affiliations, specific match reasons,
- *   profile tags, and a data completeness score (0.0 – 1.0).
+ * 2. DETERMINISTIC TRANSITION SIGNALS:
+ *    - 3-Tier Transition Status:
+ *        * 'verified': Documented departure date from prior target employer +
+ *          documented start date at new venture.
+ *        * 'unverified': Plausible founder progression with partial/missing timestamps.
+ *        * 'insufficient_evidence': Missing sequential evidence. Never infers startup
+ *          creation solely from leaving an employer.
+ *
+ * 3. AI RESEARCH & INTELLIGENCE DOSSIER (Claude Sonnet 4.6 via LiteLLM):
+ *    - Career Timeline Reconstruction
+ *    - Fact-Grounded Synthesis vs. Uncertainties / Data Gaps separation
+ *    - Recommended Diligence Questions
+ *    - Human-in-the-Loop Editable Outreach Generation
+ *
+ * 4. PERSISTENCE & WORKSPACE (SQLite):
+ *    - Saved Founders & Custom Watchlists
+ *    - Editable Research Notes
+ *    - Recent Discovery Queries & Search History
+ *
+ * 5. SYSTEM HEALTH & TELEMETRY:
+ *    - Real-time diagnostics for Crustdata, LiteLLM, Neatlogs OTLP, Entire CLI, and SQLite
  * ============================================================================
  */
 
