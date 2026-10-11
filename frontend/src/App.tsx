@@ -1,122 +1,107 @@
-import { useState } from 'react'
-import heroImg from './assets/hero.png'
-import reactLogo from './assets/react.svg'
-import viteLogo from './assets/vite.svg'
-import './App.css'
+import React, { useState } from 'react';
+import { NavigationTab, FounderProfile } from './types';
+import { Navbar } from './components/Navbar';
+import { LandingPage } from './pages/LandingPage';
+import { OverviewPage } from './pages/OverviewPage';
+import { DiscoverPage } from './pages/DiscoverPage';
+import { ProfileDetailPage } from './pages/ProfileDetailPage';
+import { WatchlistsPage } from './pages/WatchlistsPage';
+import { ResearchPage } from './pages/ResearchPage';
+import { SettingsPage } from './pages/SettingsPage';
 
-function App() {
-  const [count, setCount] = useState(0)
+export function App() {
+  const [currentTab, setCurrentTab] = useState<NavigationTab>('landing');
+  const [selectedProfileId, setSelectedProfileId] = useState<string | null>(null);
+  const [searchParams, setSearchParams] = useState<{ query?: string; employer?: string }>({});
+  const [mobileMenuOpen, setMobileMenuOpen] = useState<boolean>(false);
+
+  const handleOpenDossier = (profileId: string) => {
+    setSelectedProfileId(profileId);
+    setCurrentTab('profile');
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
+  const handleRunSearch = (query: string, employer?: string) => {
+    setSearchParams({ query, employer });
+    setCurrentTab('discover');
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
+  const handleDraftOutreach = (profile: FounderProfile) => {
+    setSelectedProfileId(profile.id);
+    setCurrentTab('profile');
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
 
   return (
-    <>
-      <section id="center">
-        <div className="hero">
-          <img src={heroImg} className="base" width="170" height="179" alt="" />
-          <img src={reactLogo} className="framework" alt="React logo" />
-          <img src={viteLogo} className="vite" alt="Vite logo" />
-        </div>
-        <div>
-          <h1>Get started</h1>
-          <p>
-            Edit <code>src/App.tsx</code> and save to test <code>HMR</code>
-          </p>
-        </div>
-        <button
-          type="button"
-          className="counter"
-          onClick={() => setCount((count) => count + 1)}
-        >
-          Count is {count}
-        </button>
-      </section>
+    <div className="min-h-screen bg-[#07090e] text-slate-100 flex flex-col font-sans selection:bg-indigo-500/30 selection:text-indigo-200">
+      {/* Top Navbar */}
+      <Navbar
+        currentTab={currentTab}
+        onSelectTab={(tab) => {
+          setCurrentTab(tab);
+          window.scrollTo({ top: 0, behavior: 'smooth' });
+        }}
+        mobileMenuOpen={mobileMenuOpen}
+        setMobileMenuOpen={setMobileMenuOpen}
+      />
 
-      <div className="ticks"></div>
+      {/* Main Content Area */}
+      <main className="flex-1 pb-16">
+        {currentTab === 'landing' && (
+          <LandingPage
+            onEnterApp={(tab) => {
+              setCurrentTab(tab || 'overview');
+              window.scrollTo({ top: 0, behavior: 'smooth' });
+            }}
+          />
+        )}
 
-      <section id="next-steps">
-        <div id="docs">
-          <svg className="icon" role="presentation" aria-hidden="true">
-            <use href="/icons.svg#documentation-icon"></use>
-          </svg>
-          <h2>Documentation</h2>
-          <p>Your questions, answered</p>
-          <ul>
-            <li>
-              <a href="https://vite.dev/" target="_blank">
-                <img className="logo" src={viteLogo} alt="" />
-                Explore Vite
-              </a>
-            </li>
-            <li>
-              <a href="https://react.dev/" target="_blank">
-                <img className="button-icon" src={reactLogo} alt="" />
-                Learn more
-              </a>
-            </li>
-          </ul>
-        </div>
-        <div id="social">
-          <svg className="icon" role="presentation" aria-hidden="true">
-            <use href="/icons.svg#social-icon"></use>
-          </svg>
-          <h2>Connect with us</h2>
-          <p>Join the Vite community</p>
-          <ul>
-            <li>
-              <a href="https://github.com/vitejs/vite" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#github-icon"></use>
-                </svg>
-                GitHub
-              </a>
-            </li>
-            <li>
-              <a href="https://chat.vite.dev/" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#discord-icon"></use>
-                </svg>
-                Discord
-              </a>
-            </li>
-            <li>
-              <a href="https://x.com/vite_js" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#x-icon"></use>
-                </svg>
-                X.com
-              </a>
-            </li>
-            <li>
-              <a href="https://bsky.app/profile/vite.dev" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#bluesky-icon"></use>
-                </svg>
-                Bluesky
-              </a>
-            </li>
-          </ul>
-        </div>
-      </section>
+        {currentTab === 'overview' && (
+          <OverviewPage
+            onNavigate={(tab) => {
+              setCurrentTab(tab);
+              window.scrollTo({ top: 0, behavior: 'smooth' });
+            }}
+            onOpenDossier={handleOpenDossier}
+            onRunSearch={handleRunSearch}
+          />
+        )}
 
-      <div className="ticks"></div>
-      <section id="spacer"></section>
-    </>
-  )
+        {currentTab === 'discover' && (
+          <DiscoverPage
+            initialQuery={searchParams.query}
+            initialEmployer={searchParams.employer}
+            onOpenDossier={handleOpenDossier}
+            onDraftOutreach={handleDraftOutreach}
+          />
+        )}
+
+        {currentTab === 'profile' && selectedProfileId && (
+          <ProfileDetailPage
+            profileId={selectedProfileId}
+            onBack={() => setCurrentTab('discover')}
+            onDraftOutreach={handleDraftOutreach}
+          />
+        )}
+
+        {currentTab === 'watchlists' && (
+          <WatchlistsPage
+            onOpenDossier={handleOpenDossier}
+            onNavigateToDiscover={() => setCurrentTab('discover')}
+          />
+        )}
+
+        {currentTab === 'research' && (
+          <ResearchPage onOpenDossier={handleOpenDossier} />
+        )}
+
+        {currentTab === 'settings' && (
+          <SettingsPage />
+        )}
+      </main>
+    </div>
+  );
 }
 
-export default App
+export default App;
