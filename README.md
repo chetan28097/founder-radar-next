@@ -246,3 +246,20 @@ Checks verified:
 ## 🛡️ License
 
 Private development & evaluation for Neathacks 2026. All rights reserved.
+
+---
+
+## Team Rm-rf — NeatHacks Submission
+
+**Founder Radar** is built and submitted for **NeatHacks 2026** by **Team Rm-rf**.
+
+### Core Tech Stack:
+- **FastAPI**: High-performance backend API with asynchronous request lifecycle and Pydantic v2 schemas.
+- **LiteLLM (Claude Sonnet 4.6)**: Factual AI synthesis, gap analysis, and tailored founder outreach drafting.
+- **Crustdata**: People Search API (`v2025-11-01`) powering candidate discovery and career trajectory reconstruction.
+- **Neatlogs**: OTLP/HTTP distributed telemetry and end-to-end tracing across search and AI workflows.
+- **Entire**: Developer checkpointing and session auditability with Antigravity agent integration.
+
+<!-- Entire Checkpoint Baseline: Antigravity Session -->
+
+<!-- Entire Checkpoint Baseline: Antigravity Session -->
