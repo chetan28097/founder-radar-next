@@ -1,3 +1,4 @@
+import os
 import logging
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
@@ -48,6 +49,16 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+if os.getenv("VERCEL"):
+    # Serverless instances can be frozen right after a response, before the batch
+    # exporter's next interval, so flush spans at the end of each request.
+    @app.middleware("http")
+    async def flush_spans_after_request(request, call_next):
+        response = await call_next(request)
+        flush_traces()
+        return response
+
 
 # Mount API Routers
 app.include_router(health.router)

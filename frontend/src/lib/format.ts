@@ -67,7 +67,7 @@ export function isKnownLocation(location?: string | null): location is string {
 /** Turn fetch/API failures into a sentence a person can act on. */
 export function errorMessage(err: unknown, fallback: string): string {
   if (err instanceof TypeError) {
-    return 'Could not reach the Founder Radar backend. Check that it is running on port 8000.';
+    return 'Could not reach the Founder Radar backend. Locally, check that it is running on port 8000.';
   }
   if (err instanceof Error && err.message) return err.message;
   return fallback;

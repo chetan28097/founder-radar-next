@@ -206,6 +206,23 @@ npm run dev
 
 Frontend will be accessible at `http://localhost:5173`.
 
+### 3. Deploy on Vercel (Services)
+
+`vercel.json` defines two services in one project:
+
+| Service | Root | Public path | Notes |
+| :--- | :--- | :--- | :--- |
+| `backend` | `backend/` | `/api/*` | FastAPI, entrypoint `app.main:app`. Receives the original path (`/api/search`), matching the existing routes. |
+| `frontend` | `frontend/` | everything else | Vite static build. Calls the API same-origin (`/api/...`). |
+
+No service bindings are needed: the frontend is a static SPA, so its API calls come from the browser through the public `/api` rewrite, and the backend does not call the frontend.
+
+Set these in the Vercel project's environment variables (never in the frontend): `CRUSTDATA_API_KEY`, `LITELLM_API_KEY`, `LITELLM_BASE_URL`, `LITELLM_MODEL`, `NEATLOGS_API_KEY`.
+
+On Vercel the SQLite file defaults to `/tmp/founder_radar.db`, which is per-instance and ephemeral: saved founders, notes and research do not persist across cold starts. Set `DATABASE_PATH` or move to a hosted database for durable storage.
+
+Local development: `npm run dev` proxies `/api/*` to `127.0.0.1:8000` (see `frontend/vite.config.ts`). `vercel dev` runs both services together.
+
 ### Routes (hash-based, refresh-safe)
 
 | Route | Page |

@@ -26,8 +26,11 @@ class Settings(BaseSettings):
     NEATLOGS_API_KEY: str = os.getenv("NEATLOGS_API_KEY", "")
     NEATLOGS_WORKFLOW: str = "founder-radar"
 
-    # Database
-    DATABASE_PATH: str = os.getenv("DATABASE_PATH", "founder_radar.db")
+    # Database. Vercel functions can only write to /tmp, which is per-instance and
+    # ephemeral, so data there does not persist across cold starts or instances.
+    DATABASE_PATH: str = os.getenv("DATABASE_PATH") or (
+        "/tmp/founder_radar.db" if os.getenv("VERCEL") else "founder_radar.db"
+    )
 
     # CORS
     CORS_ORIGINS: List[str] = [

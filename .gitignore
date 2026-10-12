@@ -46,5 +46,8 @@ Thumbs.db
 *.swp
 *.swo
 
+# Vercel CLI project link
+.vercel/
+
 # Entire local cache / personal overrides (preserve tracked settings)
 .entire/settings.local.json

@@ -9,7 +9,10 @@ import {
   RecentSearch,
 } from '../types';
 
-const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:8000';
+// Same-origin by default: on Vercel the top-level rewrite sends /api/* to the backend
+// service, and in `npm run dev` the Vite proxy forwards /api/* to 127.0.0.1:8000.
+// Set VITE_API_BASE_URL only to point the UI at a backend on another origin.
+const API_BASE = (import.meta.env.VITE_API_BASE_URL || '').replace(/\/$/, '');
 
 export class ApiError extends Error {
   status: number;
@@ -37,7 +40,7 @@ async function handleResponse<T>(res: Response): Promise<T> {
 
 export const api = {
   async getHealth(): Promise<HealthResponse> {
-    const res = await fetch(`${API_BASE}/health`);
+    const res = await fetch(`${API_BASE}/api/health`);
     return handleResponse<HealthResponse>(res);
   },
 
