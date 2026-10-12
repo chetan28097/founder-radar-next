@@ -1,139 +1,83 @@
 import React from 'react';
-import { MapPin, Building2, Bookmark, BookmarkCheck, ArrowRight, Mail } from 'lucide-react';
+import { Bookmark, BookmarkCheck, MapPin } from 'lucide-react';
 import { FounderProfile } from '../types';
 import { StatusBadge } from './StatusBadge';
+import { Avatar, OutLink } from './ui';
+import { paths } from '../lib/router';
+import { isKnownLocation, monthYear } from '../lib/format';
 
 interface FounderCardProps {
   profile: FounderProfile;
   isSaved?: boolean;
-  onOpenDossier: (profileId: string) => void;
   onSave: (profile: FounderProfile) => void;
-  onDraftOutreach?: (profile: FounderProfile) => void;
 }
 
-export const FounderCard: React.FC<FounderCardProps> = ({
-  profile,
-  isSaved = false,
-  onOpenDossier,
-  onSave,
-  onDraftOutreach,
-}) => {
-  const getInitials = (name: string) => {
-    return name
-      .split(' ')
-      .map((n) => n[0])
-      .slice(0, 2)
-      .join('')
-      .toUpperCase();
-  };
-
-  const pastCompany = profile.past_jobs.length > 0 ? profile.past_jobs[0].company : null;
+export const FounderCard: React.FC<FounderCardProps> = ({ profile, isSaved = false, onSave }) => {
+  const previous = profile.past_jobs
+    .map((j) => j.company)
+    .filter((c, i, all) => c && c !== 'Previous Company' && all.indexOf(c) === i)
+    .slice(0, 3);
+  const since = monthYear(profile.company?.start_date);
 
   return (
-    <div className="glass-card glass-card-hover rounded-xl p-5 border border-white/5 flex flex-col justify-between group">
-      <div>
-        {/* Header: Avatar, Name, Title, and Transition Status */}
-        <div className="flex items-start justify-between gap-3 mb-3">
-          <div className="flex items-center gap-3">
-            {profile.avatar_url ? (
-              <img
-                src={profile.avatar_url}
-                alt={profile.name}
-                className="w-12 h-12 rounded-full object-cover border border-white/10 shrink-0"
-              />
-            ) : (
-              <div className="w-12 h-12 rounded-full bg-gradient-to-br from-indigo-500/20 to-purple-500/20 border border-white/10 flex items-center justify-center text-sm font-semibold text-indigo-300 shrink-0">
-                {getInitials(profile.name)}
-              </div>
-            )}
-            <div>
-              <h3 className="text-base font-semibold text-slate-100 group-hover:text-indigo-400 transition-colors">
-                {profile.name}
-              </h3>
-              <p className="text-xs text-slate-400 line-clamp-1">
-                {profile.current_title || 'Founder'}
-                {profile.current_company && ` at ${profile.current_company}`}
-              </p>
-            </div>
+    <article className="group flex flex-col gap-3 border-b border-line px-4 py-4 transition-colors last:border-0 hover:bg-surface-2/60 sm:flex-row sm:items-start sm:gap-4 sm:px-5">
+      <div className="flex min-w-0 flex-1 items-start gap-3.5">
+        <Avatar name={profile.name} src={profile.avatar_url} size={44} />
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1">
+            <a href={paths.profile(profile.id)} className="text-[16px] font-semibold text-ink hover:text-accent">
+              {profile.name}
+            </a>
+            {profile.founder_status && <StatusBadge status={profile.transition_status} size="sm" />}
           </div>
-          <StatusBadge status={profile.transition_status} size="sm" />
-        </div>
-
-        {/* Location & Past Employment Pills */}
-        <div className="flex flex-wrap items-center gap-2 mb-3 text-xs text-slate-400">
-          {profile.location && profile.location !== 'Location Unknown' && (
-            <span className="inline-flex items-center gap-1 bg-white/[0.03] border border-white/5 rounded-md px-2 py-0.5">
-              <MapPin className="w-3 h-3 text-slate-500" />
-              <span>{profile.location}</span>
-            </span>
-          )}
-          {pastCompany && (
-            <span className="inline-flex items-center gap-1 bg-white/[0.03] border border-white/5 rounded-md px-2 py-0.5">
-              <Building2 className="w-3 h-3 text-indigo-400" />
-              <span>Ex-{pastCompany}</span>
-            </span>
-          )}
-        </div>
-
-        {/* Transition trajectory summary */}
-        <p className="text-xs text-slate-300 line-clamp-2 leading-relaxed mb-4 bg-white/[0.015] p-2.5 rounded-lg border border-white/5">
-          {profile.transition_summary || 'Professional profile records active leadership in current venture.'}
-        </p>
-
-        {/* Match tags */}
-        <div className="flex flex-wrap gap-1.5 mb-4">
-          {profile.tags.slice(0, 3).map((tag, idx) => (
-            <span
-              key={idx}
-              className="text-[11px] px-2 py-0.5 rounded-md bg-white/[0.04] border border-white/5 text-slate-300 font-mono"
-            >
-              {tag}
-            </span>
-          ))}
-          {profile.data_completeness > 0.7 && (
-            <span className="text-[11px] px-2 py-0.5 rounded-md bg-cyan-950/30 border border-cyan-500/20 text-cyan-300 font-mono">
-              High Completeness
-            </span>
-          )}
+          <p className="mt-0.5 text-[14px] text-ink-2">
+            {profile.current_title || <span className="text-ink-3">No current title</span>}
+            {profile.current_company && (
+              <>
+                <span className="text-ink-3"> at </span>
+                <span className="font-medium text-ink">{profile.current_company}</span>
+              </>
+            )}
+            {since && <span className="tabular text-ink-3"> since {since}</span>}
+          </p>
+          <div className="mt-1.5 flex flex-wrap items-center gap-x-4 gap-y-1 text-[13px] text-ink-3">
+            {isKnownLocation(profile.location) && (
+              <span className="inline-flex items-center gap-1">
+                <MapPin className="h-3.5 w-3.5" strokeWidth={1.75} aria-hidden />
+                {profile.location}
+              </span>
+            )}
+            {previous.length > 0 && (
+              <span>
+                Previously <span className="text-ink-2">{previous.join(', ')}</span>
+              </span>
+            )}
+          </div>
         </div>
       </div>
 
-      {/* Footer Actions */}
-      <div className="pt-3 border-t border-white/5 flex items-center justify-between gap-2">
+      <div className="flex shrink-0 items-center gap-2 pl-[58px] sm:pl-0">
+        {profile.linkedin_url && (
+          <OutLink href={profile.linkedin_url} variant="button" title={`${profile.name} on LinkedIn`}>
+            LinkedIn
+          </OutLink>
+        )}
         <button
           onClick={() => onSave(profile)}
-          className={`p-2 rounded-lg text-xs font-medium border transition-colors flex items-center gap-1.5 ${
-            isSaved
-              ? 'bg-indigo-950/40 border-indigo-500/40 text-indigo-300 hover:bg-indigo-900/40'
-              : 'bg-white/[0.03] border-white/10 text-slate-400 hover:text-slate-200 hover:bg-white/[0.06]'
-          }`}
-          title={isSaved ? 'Saved to Watchlist' : 'Save to Watchlist'}
+          className={`btn ${isSaved ? 'btn-secondary text-accent' : 'btn-secondary'}`}
+          aria-label={isSaved ? `${profile.name} is saved` : `Save ${profile.name}`}
         >
-          {isSaved ? <BookmarkCheck className="w-3.5 h-3.5 text-indigo-400" /> : <Bookmark className="w-3.5 h-3.5" />}
-          <span className="hidden sm:inline">{isSaved ? 'Saved' : 'Save'}</span>
-        </button>
-
-        <div className="flex items-center gap-2">
-          {onDraftOutreach && (
-            <button
-              onClick={() => onDraftOutreach(profile)}
-              className="p-2 sm:px-2.5 sm:py-1.5 rounded-lg text-xs font-medium bg-white/[0.03] hover:bg-white/[0.08] border border-white/10 text-slate-300 transition-colors flex items-center gap-1.5"
-              title="Draft Outreach"
-            >
-              <Mail className="w-3.5 h-3.5 text-purple-400" />
-              <span className="hidden sm:inline">Outreach</span>
-            </button>
+          {isSaved ? (
+            <BookmarkCheck className="h-4 w-4" strokeWidth={1.75} aria-hidden />
+          ) : (
+            <Bookmark className="h-4 w-4" strokeWidth={1.75} aria-hidden />
           )}
-
-          <button
-            onClick={() => onOpenDossier(profile.id)}
-            className="px-3 py-1.5 rounded-lg text-xs font-medium bg-indigo-600 hover:bg-indigo-500 text-white transition-colors flex items-center gap-1 shadow-sm shadow-indigo-600/30"
-          >
-            <span>Dossier</span>
-            <ArrowRight className="w-3 h-3" />
-          </button>
-        </div>
+          <span className="hidden md:inline">{isSaved ? 'Saved' : 'Save'}</span>
+        </button>
+        <a href={paths.profile(profile.id)} className="btn btn-primary">
+          Dossier
+        </a>
       </div>
-    </div>
+    </article>
   );
 };

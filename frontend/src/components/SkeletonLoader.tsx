@@ -1,37 +1,22 @@
 import React from 'react';
 
-export const SkeletonCard: React.FC = () => {
-  return (
-    <div className="glass-card rounded-xl p-5 border border-white/5 animate-pulse space-y-4">
-      <div className="flex items-start justify-between">
-        <div className="flex items-center gap-3">
-          <div className="w-12 h-12 rounded-full bg-slate-800/80" />
-          <div className="space-y-2">
-            <div className="w-32 h-4 rounded bg-slate-800" />
-            <div className="w-48 h-3 rounded bg-slate-800/60" />
-          </div>
-        </div>
-        <div className="w-24 h-6 rounded-full bg-slate-800/60" />
-      </div>
-
-      <div className="space-y-2 pt-2">
-        <div className="w-full h-3 rounded bg-slate-800/40" />
-        <div className="w-3/4 h-3 rounded bg-slate-800/40" />
-      </div>
-
-      <div className="flex items-center gap-2 pt-2">
-        <div className="w-20 h-6 rounded bg-slate-800/50" />
-        <div className="w-24 h-6 rounded bg-slate-800/50" />
-        <div className="w-16 h-6 rounded bg-slate-800/50" />
-      </div>
-
-      <div className="flex items-center justify-between pt-3 border-t border-white/5">
-        <div className="w-28 h-3 rounded bg-slate-800/40" />
-        <div className="flex gap-2">
-          <div className="w-20 h-8 rounded-lg bg-slate-800" />
-          <div className="w-20 h-8 rounded-lg bg-slate-800" />
-        </div>
-      </div>
+/** Matches the FounderCard row layout so results do not jump when they load. */
+export const SkeletonCard: React.FC = () => (
+  <div className="flex items-start gap-4 border-b border-line px-4 py-4 last:border-0 sm:px-5" aria-hidden>
+    <div className="skeleton h-11 w-11 shrink-0 rounded-[10px]" />
+    <div className="flex-1 space-y-2.5">
+      <div className="skeleton h-4 w-48" />
+      <div className="skeleton h-3.5 w-72 max-w-full" />
+      <div className="skeleton h-3 w-40" />
     </div>
-  );
-};
+    <div className="skeleton hidden h-8 w-24 sm:block" />
+  </div>
+);
+
+export const SkeletonBlock: React.FC<{ lines?: number }> = ({ lines = 3 }) => (
+  <div className="space-y-2.5" aria-hidden>
+    {Array.from({ length: lines }).map((_, i) => (
+      <div key={i} className="skeleton h-3.5" style={{ width: `${92 - i * 14}%` }} />
+    ))}
+  </div>
+);

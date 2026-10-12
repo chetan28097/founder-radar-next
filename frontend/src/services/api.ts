@@ -11,6 +11,14 @@ import {
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:8000';
 
+export class ApiError extends Error {
+  status: number;
+  constructor(message: string, status: number) {
+    super(message);
+    this.status = status;
+  }
+}
+
 async function handleResponse<T>(res: Response): Promise<T> {
   if (!res.ok) {
     let errorMsg = `API error: ${res.status} ${res.statusText}`;
@@ -22,7 +30,7 @@ async function handleResponse<T>(res: Response): Promise<T> {
     } catch {
       // ignore
     }
-    throw new Error(errorMsg);
+    throw new ApiError(errorMsg, res.status);
   }
   return res.json();
 }
@@ -76,6 +84,12 @@ export const api = {
     return handleResponse<ResearchResponse>(res);
   },
 
+  async getLatestResearch(profileId: string): Promise<ResearchResponse | null> {
+    const res = await fetch(`${API_BASE}/api/research/${encodeURIComponent(profileId)}`);
+    if (res.status === 404) return null;
+    return handleResponse<ResearchResponse>(res);
+  },
+
   async generateOutreach(params: {
     profile_id: string;
     tone?: string;
@@ -104,7 +118,7 @@ export const api = {
     watchlist_id?: string;
     notes?: string;
     tags?: string[];
-    raw_profile?: any;
+    raw_profile?: unknown;
   }): Promise<SavedFounder> {
     const res = await fetch(`${API_BASE}/api/saved`, {
       method: 'POST',

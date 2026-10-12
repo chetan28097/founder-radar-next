@@ -21,9 +21,10 @@ def health_check():
     except Exception:
         db_ok = False
 
+    # Configuration checks only: no paid provider call is made from the health endpoint.
     crustdata_ok = bool(settings.CRUSTDATA_API_KEY)
     litellm_ok = bool(settings.LITELLM_API_KEY and settings.LITELLM_MODEL)
-    neatlogs_ok = is_tracer_active() or bool(settings.NEATLOGS_API_KEY)
+    neatlogs_ok = bool(settings.NEATLOGS_API_KEY)
 
     overall_status = "healthy" if (db_ok and crustdata_ok and litellm_ok) else "degraded"
 
@@ -32,6 +33,7 @@ def health_check():
         crustdata_connected=crustdata_ok,
         litellm_connected=litellm_ok,
         neatlogs_connected=neatlogs_ok,
+        neatlogs_tracer_active=is_tracer_active(),
         model_id=settings.LITELLM_MODEL,
         database_connected=db_ok,
         timestamp=datetime.now(timezone.utc).isoformat(),

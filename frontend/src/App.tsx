@@ -1,5 +1,3 @@
-import React, { useState } from 'react';
-import { NavigationTab, FounderProfile } from './types';
 import { Navbar } from './components/Navbar';
 import { LandingPage } from './pages/LandingPage';
 import { OverviewPage } from './pages/OverviewPage';
@@ -8,98 +6,45 @@ import { ProfileDetailPage } from './pages/ProfileDetailPage';
 import { WatchlistsPage } from './pages/WatchlistsPage';
 import { ResearchPage } from './pages/ResearchPage';
 import { SettingsPage } from './pages/SettingsPage';
+import { BuiltWithPage } from './pages/BuiltWithPage';
+import { EmptyState } from './components/EmptyState';
+import { navigate, paths, useRoute } from './lib/router';
 
 export function App() {
-  const [currentTab, setCurrentTab] = useState<NavigationTab>('landing');
-  const [selectedProfileId, setSelectedProfileId] = useState<string | null>(null);
-  const [searchParams, setSearchParams] = useState<{ query?: string; employer?: string }>({});
-  const [mobileMenuOpen, setMobileMenuOpen] = useState<boolean>(false);
-
-  const handleOpenDossier = (profileId: string) => {
-    setSelectedProfileId(profileId);
-    setCurrentTab('profile');
-    window.scrollTo({ top: 0, behavior: 'smooth' });
-  };
-
-  const handleRunSearch = (query: string, employer?: string) => {
-    setSearchParams({ query, employer });
-    setCurrentTab('discover');
-    window.scrollTo({ top: 0, behavior: 'smooth' });
-  };
-
-  const handleDraftOutreach = (profile: FounderProfile) => {
-    setSelectedProfileId(profile.id);
-    setCurrentTab('profile');
-    window.scrollTo({ top: 0, behavior: 'smooth' });
-  };
+  const route = useRoute();
 
   return (
-    <div className="min-h-screen bg-[#07090e] text-slate-100 flex flex-col font-sans selection:bg-indigo-500/30 selection:text-indigo-200">
-      {/* Top Navbar */}
-      <Navbar
-        currentTab={currentTab}
-        onSelectTab={(tab) => {
-          setCurrentTab(tab);
-          window.scrollTo({ top: 0, behavior: 'smooth' });
-        }}
-        mobileMenuOpen={mobileMenuOpen}
-        setMobileMenuOpen={setMobileMenuOpen}
-      />
-
-      {/* Main Content Area */}
-      <main className="flex-1 pb-16">
-        {currentTab === 'landing' && (
-          <LandingPage
-            onEnterApp={(tab) => {
-              setCurrentTab(tab || 'overview');
-              window.scrollTo({ top: 0, behavior: 'smooth' });
-            }}
-          />
-        )}
-
-        {currentTab === 'overview' && (
-          <OverviewPage
-            onNavigate={(tab) => {
-              setCurrentTab(tab);
-              window.scrollTo({ top: 0, behavior: 'smooth' });
-            }}
-            onOpenDossier={handleOpenDossier}
-            onRunSearch={handleRunSearch}
-          />
-        )}
-
-        {currentTab === 'discover' && (
-          <DiscoverPage
-            initialQuery={searchParams.query}
-            initialEmployer={searchParams.employer}
-            onOpenDossier={handleOpenDossier}
-            onDraftOutreach={handleDraftOutreach}
-          />
-        )}
-
-        {currentTab === 'profile' && selectedProfileId && (
-          <ProfileDetailPage
-            profileId={selectedProfileId}
-            onBack={() => setCurrentTab('discover')}
-            onDraftOutreach={handleDraftOutreach}
-          />
-        )}
-
-        {currentTab === 'watchlists' && (
-          <WatchlistsPage
-            onOpenDossier={handleOpenDossier}
-            onNavigateToDiscover={() => setCurrentTab('discover')}
-          />
-        )}
-
-        {currentTab === 'research' && (
-          <ResearchPage onOpenDossier={handleOpenDossier} />
-        )}
-
-        {currentTab === 'settings' && (
-          <SettingsPage />
+    <div className="flex min-h-[100dvh] flex-col bg-paper text-ink">
+      <Navbar route={route} />
+      <main id="main" className="flex-1 pb-16">
+        {route.name === 'landing' && <LandingPage />}
+        {route.name === 'overview' && <OverviewPage />}
+        {route.name === 'discover' && <DiscoverPage />}
+        {route.name === 'profile' && <ProfileDetailPage key={route.id} profileId={route.id} />}
+        {route.name === 'watchlists' && <WatchlistsPage />}
+        {route.name === 'research' && <ResearchPage key={route.founderId || 'none'} founderId={route.founderId} />}
+        {route.name === 'settings' && <SettingsPage />}
+        {route.name === 'built-with' && <BuiltWithPage />}
+        {route.name === 'not-found' && (
+          <div className="mx-auto max-w-6xl px-4 py-12 sm:px-6">
+            <EmptyState
+              type="error"
+              title="Page not found"
+              description={`There is no page at "${route.path}".`}
+              actionText="Go to Discover"
+              onAction={() => navigate(paths.discover())}
+            />
+          </div>
         )}
       </main>
+      <footer className="border-t border-line">
+        <div className="mx-auto flex max-w-6xl flex-col gap-2 px-4 py-5 text-[13px] text-ink-3 sm:flex-row sm:items-center sm:justify-between sm:px-6">
+          <span>Founder Radar. Profile data from Crustdata; research by Claude via LiteLLM.</span>
+          <a href={paths.builtWith()} className="link w-fit">
+            How it was built
+          </a>
+        </div>
+      </footer>
     </div>
   );
 }

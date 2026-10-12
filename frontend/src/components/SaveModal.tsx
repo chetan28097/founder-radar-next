@@ -1,7 +1,8 @@
-import React, { useState, useEffect } from 'react';
-import { X, Bookmark, Plus, Loader2 } from 'lucide-react';
+import React, { useState, useEffect, useRef } from 'react';
+import { X, Plus, Loader2 } from 'lucide-react';
 import { FounderProfile, Watchlist } from '../types';
 import { api } from '../services/api';
+import { errorMessage } from '../lib/format';
 
 interface SaveModalProps {
   profile: FounderProfile | null;
@@ -10,30 +11,34 @@ interface SaveModalProps {
   onSuccess: () => void;
 }
 
-export const SaveModal: React.FC<SaveModalProps> = ({
-  profile,
-  isOpen,
-  onClose,
-  onSuccess,
-}) => {
+export const SaveModal: React.FC<SaveModalProps> = ({ profile, isOpen, onClose, onSuccess }) => {
   const [watchlists, setWatchlists] = useState<Watchlist[]>([]);
   const [selectedWatchlist, setSelectedWatchlist] = useState<string>('');
   const [notes, setNotes] = useState<string>('');
   const [newWatchlistName, setNewWatchlistName] = useState<string>('');
   const [showNewWatchlist, setShowNewWatchlist] = useState<boolean>(false);
   const [saving, setSaving] = useState<boolean>(false);
+  const [error, setError] = useState<string | null>(null);
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const onCloseRef = useRef(onClose);
+  useEffect(() => {
+    onCloseRef.current = onClose;
+  });
 
   useEffect(() => {
-    if (isOpen) {
-      api.getWatchlists()
-        .then((data) => {
-          setWatchlists(data);
-          if (data.length > 0 && !selectedWatchlist) {
-            setSelectedWatchlist(data[0].id);
-          }
-        })
-        .catch(console.error);
-    }
+    if (!isOpen) return;
+    setError(null);
+    api
+      .getWatchlists()
+      .then((data) => {
+        setWatchlists(data);
+        setSelectedWatchlist((current) => current || data[0]?.id || '');
+      })
+      .catch((err) => setError(errorMessage(err, 'Could not load watchlists.')));
+    dialogRef.current?.focus();
+    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onCloseRef.current();
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
   }, [isOpen]);
 
   if (!isOpen || !profile) return null;
@@ -41,22 +46,19 @@ export const SaveModal: React.FC<SaveModalProps> = ({
   const handleCreateWatchlist = async () => {
     if (!newWatchlistName.trim()) return;
     try {
-      const created = await api.createWatchlist({
-        name: newWatchlistName.trim(),
-        description: 'Custom research watchlist',
-        color: 'indigo',
-      });
+      const created = await api.createWatchlist({ name: newWatchlistName.trim() });
       setWatchlists([...watchlists, created]);
       setSelectedWatchlist(created.id);
       setNewWatchlistName('');
       setShowNewWatchlist(false);
     } catch (err) {
-      console.error(err);
+      setError(errorMessage(err, 'Could not create the watchlist.'));
     }
   };
 
   const handleSave = async () => {
     setSaving(true);
+    setError(null);
     try {
       await api.saveFounder({
         profile_id: profile.id,
@@ -72,108 +74,104 @@ export const SaveModal: React.FC<SaveModalProps> = ({
       onSuccess();
       onClose();
     } catch (err) {
-      console.error(err);
+      setError(errorMessage(err, 'Could not save this founder.'));
     } finally {
       setSaving(false);
     }
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm animate-fade-in">
-      <div className="glass-panel w-full max-w-md rounded-2xl border border-white/10 p-6 shadow-2xl relative">
-        <button
-          onClick={onClose}
-          className="absolute top-4 right-4 p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-white/5 transition-colors"
-        >
-          <X className="w-5 h-5" />
+    <div
+      className="fixed inset-0 z-50 flex items-end justify-center bg-ink/30 p-0 sm:items-center sm:p-4"
+      onMouseDown={(e) => e.target === e.currentTarget && onClose()}
+    >
+      <div
+        ref={dialogRef}
+        tabIndex={-1}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="save-dialog-title"
+        className="relative w-full max-w-md rounded-t-xl border border-line bg-surface p-5 shadow-card outline-none sm:rounded-xl sm:p-6"
+      >
+        <button onClick={onClose} className="btn btn-quiet absolute right-3 top-3 px-2" aria-label="Close">
+          <X className="h-4 w-4" strokeWidth={1.75} />
         </button>
 
-        <div className="flex items-center gap-3 mb-5">
-          <div className="w-10 h-10 rounded-xl bg-indigo-500/10 border border-indigo-500/20 flex items-center justify-center text-indigo-400">
-            <Bookmark className="w-5 h-5" />
-          </div>
-          <div>
-            <h3 className="text-base font-semibold text-slate-100">Save to Watchlist</h3>
-            <p className="text-xs text-slate-400">Organize {profile.name} in your research pipeline</p>
-          </div>
-        </div>
+        <h2 id="save-dialog-title" className="pr-8 text-[18px] font-semibold text-ink">
+          Save {profile.name}
+        </h2>
+        <p className="mt-1 text-[14px] text-ink-2">Add to a watchlist. Notes stay on this machine in SQLite.</p>
 
-        <div className="space-y-4">
-          {/* Watchlist Picker */}
+        <div className="mt-5 space-y-4">
           <div>
-            <div className="flex items-center justify-between mb-1.5">
-              <label className="text-xs font-medium text-slate-300">Target Watchlist</label>
+            <div className="mb-1.5 flex items-center justify-between">
+              <label htmlFor="save-watchlist" className="text-[13px] font-medium text-ink-2">
+                Watchlist
+              </label>
               <button
                 type="button"
                 onClick={() => setShowNewWatchlist(!showNewWatchlist)}
-                className="text-xs text-indigo-400 hover:text-indigo-300 flex items-center gap-1"
+                className="inline-flex items-center gap-1 text-[13px] font-medium text-accent"
               >
-                <Plus className="w-3 h-3" />
-                <span>New List</span>
+                <Plus className="h-3.5 w-3.5" strokeWidth={2} aria-hidden />
+                New list
               </button>
             </div>
-
-            {showNewWatchlist ? (
-              <div className="flex gap-2 mb-2">
+            {showNewWatchlist && (
+              <div className="mb-2 flex gap-2">
                 <input
                   type="text"
-                  placeholder="Watchlist name..."
+                  placeholder="List name"
                   value={newWatchlistName}
                   onChange={(e) => setNewWatchlistName(e.target.value)}
-                  className="flex-1 px-3 py-1.5 text-xs rounded-lg bg-white/[0.04] border border-white/10 text-slate-200 focus:outline-none focus:border-indigo-500"
+                  onKeyDown={(e) => e.key === 'Enter' && handleCreateWatchlist()}
+                  className="field"
+                  autoFocus
                 />
-                <button
-                  type="button"
-                  onClick={handleCreateWatchlist}
-                  className="px-3 py-1.5 text-xs rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white font-medium"
-                >
+                <button type="button" onClick={handleCreateWatchlist} className="btn btn-secondary">
                   Create
                 </button>
               </div>
-            ) : null}
-
+            )}
             <select
+              id="save-watchlist"
               value={selectedWatchlist}
               onChange={(e) => setSelectedWatchlist(e.target.value)}
-              className="w-full px-3 py-2 text-xs rounded-lg bg-white/[0.04] border border-white/10 text-slate-200 focus:outline-none focus:border-indigo-500"
+              className="field"
             >
+              <option value="">No list</option>
               {watchlists.map((wl) => (
-                <option key={wl.id} value={wl.id} className="bg-slate-900 text-slate-200">
-                  {wl.name} ({wl.member_count} saved)
+                <option key={wl.id} value={wl.id}>
+                  {wl.name} ({wl.member_count})
                 </option>
               ))}
             </select>
           </div>
 
-          {/* Research Notes */}
           <div>
-            <label className="block text-xs font-medium text-slate-300 mb-1.5">
-              Initial Research Notes (Optional)
+            <label htmlFor="save-notes" className="mb-1.5 block text-[13px] font-medium text-ink-2">
+              Note <span className="font-normal text-ink-3">(optional)</span>
             </label>
             <textarea
+              id="save-notes"
               rows={3}
-              placeholder="e.g. Followed their work at Stripe; strong infra credentials..."
+              placeholder="Why this founder is worth a look"
               value={notes}
               onChange={(e) => setNotes(e.target.value)}
-              className="w-full px-3 py-2 text-xs rounded-lg bg-white/[0.04] border border-white/10 text-slate-200 placeholder-slate-500 focus:outline-none focus:border-indigo-500 resize-none"
+              className="field resize-none"
             />
           </div>
+
+          {error && <p className="text-[13px] text-danger">{error}</p>}
         </div>
 
-        <div className="mt-6 flex items-center justify-end gap-2.5">
-          <button
-            onClick={onClose}
-            className="px-4 py-2 rounded-xl text-xs font-medium text-slate-400 hover:text-slate-200 hover:bg-white/5 transition-colors"
-          >
+        <div className="mt-6 flex justify-end gap-2">
+          <button onClick={onClose} className="btn btn-quiet">
             Cancel
           </button>
-          <button
-            onClick={handleSave}
-            disabled={saving}
-            className="px-4 py-2 rounded-xl text-xs font-medium bg-indigo-600 hover:bg-indigo-500 text-white transition-colors flex items-center gap-1.5 shadow-lg shadow-indigo-600/30 disabled:opacity-50"
-          >
-            {saving && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
-            <span>Save Profile</span>
+          <button onClick={handleSave} disabled={saving} className="btn btn-primary">
+            {saving && <Loader2 className="h-4 w-4 animate-spin" aria-hidden />}
+            Save
           </button>
         </div>
       </div>

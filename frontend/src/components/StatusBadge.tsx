@@ -1,5 +1,4 @@
 import React from 'react';
-import { CheckCircle2, AlertCircle, HelpCircle } from 'lucide-react';
 import { TransitionStatus } from '../types';
 
 interface StatusBadgeProps {
@@ -7,48 +6,38 @@ interface StatusBadgeProps {
   size?: 'sm' | 'md';
 }
 
+/*
+  The backend keys stay verified / unverified / insufficient_evidence.
+  Labels describe what the record contains rather than claiming independent verification.
+*/
+const STATUS: Record<TransitionStatus, { label: string; title: string; className: string }> = {
+  verified: {
+    label: 'Dates on record',
+    title: 'The record has an end date for a past role and a start date for the current founder role.',
+    className: 'bg-ok-soft text-ok',
+  },
+  unverified: {
+    label: 'Dates incomplete',
+    title: 'Founder title is present, but some dates needed to place the transition are missing.',
+    className: 'bg-warn-soft text-warn',
+  },
+  insufficient_evidence: {
+    label: 'Not enough data',
+    title: 'The record does not contain enough dated history to describe a transition.',
+    className: 'bg-muted-soft text-ink-2',
+  },
+};
+
 export const StatusBadge: React.FC<StatusBadgeProps> = ({ status, size = 'md' }) => {
-  const isSm = size === 'sm';
-
-  switch (status) {
-    case 'verified':
-      return (
-        <span
-          className={`inline-flex items-center gap-1.5 font-medium rounded-full border bg-emerald-950/40 border-emerald-500/30 text-emerald-400 ${
-            isSm ? 'px-2 py-0.5 text-xs' : 'px-2.5 py-1 text-xs'
-          }`}
-          title="Verified: Sequential career timeline confirmed with documented dates"
-        >
-          <CheckCircle2 className={isSm ? 'w-3 h-3 text-emerald-400' : 'w-3.5 h-3.5 text-emerald-400'} />
-          <span>Verified Transition</span>
-        </span>
-      );
-
-    case 'unverified':
-      return (
-        <span
-          className={`inline-flex items-center gap-1.5 font-medium rounded-full border bg-amber-950/40 border-amber-500/30 text-amber-400 ${
-            isSm ? 'px-2 py-0.5 text-xs' : 'px-2.5 py-1 text-xs'
-          }`}
-          title="Unverified: Active founder role, but transition dates require verification"
-        >
-          <AlertCircle className={isSm ? 'w-3 h-3 text-amber-400' : 'w-3.5 h-3.5 text-amber-400'} />
-          <span>Timeline Unverified</span>
-        </span>
-      );
-
-    case 'insufficient_evidence':
-    default:
-      return (
-        <span
-          className={`inline-flex items-center gap-1.5 font-medium rounded-full border bg-slate-900/60 border-slate-700/40 text-slate-400 ${
-            isSm ? 'px-2 py-0.5 text-xs' : 'px-2.5 py-1 text-xs'
-          }`}
-          title="Insufficient Evidence: Incomplete employment history or missing timestamps"
-        >
-          <HelpCircle className={isSm ? 'w-3 h-3 text-slate-400' : 'w-3.5 h-3.5 text-slate-400'} />
-          <span>Insufficient Evidence</span>
-        </span>
-      );
-  }
+  const s = STATUS[status] ?? STATUS.insufficient_evidence;
+  return (
+    <span
+      title={s.title}
+      className={`inline-flex items-center rounded-[4px] font-medium whitespace-nowrap ${s.className} ${
+        size === 'sm' ? 'px-1.5 py-px text-[12px]' : 'px-2 py-0.5 text-[13px]'
+      }`}
+    >
+      {s.label}
+    </span>
+  );
 };

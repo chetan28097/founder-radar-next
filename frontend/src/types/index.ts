@@ -6,6 +6,36 @@ export interface CareerPosition {
   is_current: boolean;
   description?: string;
   duration_months?: number;
+  company_website?: string;
+  company_linkedin_url?: string;
+  company_logo_url?: string;
+  company_industries: string[];
+  company_headcount?: number;
+  company_headcount_range?: string;
+  company_hq?: string;
+  company_type?: string;
+  location?: string;
+}
+
+export interface EducationEntry {
+  school: string;
+  degree?: string;
+  start_year?: number;
+  end_year?: number;
+}
+
+export interface CompanyOverview {
+  name: string;
+  title?: string;
+  start_date?: string;
+  website?: string;
+  linkedin_url?: string;
+  logo_url?: string;
+  industries: string[];
+  headcount?: number;
+  headcount_range?: string;
+  hq?: string;
+  company_type?: string;
 }
 
 export type TransitionStatus = 'verified' | 'unverified' | 'insufficient_evidence';
@@ -20,6 +50,9 @@ export interface FounderProfile {
   location?: string;
   country?: string;
   avatar_url?: string;
+  linkedin_url?: string;
+  company?: CompanyOverview;
+  education: EducationEntry[];
   current_jobs: CareerPosition[];
   past_jobs: CareerPosition[];
   founder_status: boolean;
@@ -29,6 +62,7 @@ export interface FounderProfile {
   match_reasons: string[];
   tags: string[];
   data_completeness: number;
+  data_updated_at?: string;
 }
 
 export interface SearchResponse {
@@ -36,23 +70,9 @@ export interface SearchResponse {
   total_count?: number;
   profiles: FounderProfile[];
   next_cursor?: string;
-  applied_filters: Record<string, any>;
+  applied_filters: Record<string, unknown>;
   query_interpretation?: string;
   remarks?: string;
-}
-
-export interface ProfileDossier {
-  profile: FounderProfile;
-  career_timeline: CareerPosition[];
-  transition_status: TransitionStatus;
-  transition_evidence: string[];
-  ai_research_summary: string;
-  relevance_explanation: string;
-  information_gaps: string[];
-  recommended_verification: string[];
-  outreach_draft: string;
-  notes?: string;
-  watchlists: string[];
 }
 
 export interface ResearchResponse {
@@ -63,6 +83,21 @@ export interface ResearchResponse {
   uncertainties: string[];
   suggested_questions: string[];
   outreach_draft: string;
+  model?: string;
+  custom_question?: string;
+  generated_at?: string;
+}
+
+export interface ProfileDossier {
+  profile: FounderProfile;
+  career_timeline: CareerPosition[];
+  transition_status: TransitionStatus;
+  transition_evidence: string[];
+  data_gaps: string[];
+  latest_research?: ResearchResponse | null;
+  notes?: string;
+  watchlists: string[];
+  is_saved: boolean;
 }
 
 export interface OutreachDraftResponse {
@@ -93,16 +128,19 @@ export interface SavedFounder {
   watchlist_ids: string[];
   notes?: string;
   tags: string[];
-  raw_profile?: any;
+  raw_profile?: unknown;
+  researched_at?: string;
   created_at: string;
   updated_at: string;
 }
 
 export interface HealthResponse {
   status: string;
+  /** true when the API key is configured; no live provider call is made */
   crustdata_connected: boolean;
   litellm_connected: boolean;
   neatlogs_connected: boolean;
+  neatlogs_tracer_active: boolean;
   model_id: string;
   database_connected: boolean;
   timestamp: string;
@@ -111,16 +149,7 @@ export interface HealthResponse {
 export interface RecentSearch {
   id: string;
   query: string;
-  filters: Record<string, any>;
+  filters: Record<string, string | undefined>;
   result_count: number;
   created_at: string;
 }
-
-export type NavigationTab = 
-  | 'landing'
-  | 'overview'
-  | 'discover'
-  | 'profile'
-  | 'watchlists'
-  | 'research'
-  | 'settings';

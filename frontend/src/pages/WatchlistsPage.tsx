@@ -1,260 +1,219 @@
-import React, { useState, useEffect } from 'react';
-import { Compass, Plus, Trash2, ArrowRight, Bookmark, Building2, MapPin, Loader2 } from 'lucide-react';
+import React, { useEffect, useState } from 'react';
+import { Plus, Trash2, Loader2, X } from 'lucide-react';
 import { Watchlist, SavedFounder } from '../types';
 import { api } from '../services/api';
 import { EmptyState } from '../components/EmptyState';
+import { SkeletonCard } from '../components/SkeletonLoader';
+import { Notice, PageHeader } from '../components/ui';
+import { navigate, paths } from '../lib/router';
+import { errorMessage, isKnownLocation, relativeTime } from '../lib/format';
 
-interface WatchlistsPageProps {
-  onOpenDossier: (profileId: string) => void;
-  onNavigateToDiscover: () => void;
-}
-
-export const WatchlistsPage: React.FC<WatchlistsPageProps> = ({
-  onOpenDossier,
-  onNavigateToDiscover,
-}) => {
+export const WatchlistsPage: React.FC = () => {
   const [watchlists, setWatchlists] = useState<Watchlist[]>([]);
-  const [savedFounders, setSavedFounders] = useState<SavedFounder[]>([]);
-  const [selectedWatchlistId, setSelectedWatchlistId] = useState<string>('all');
-  const [loading, setLoading] = useState<boolean>(true);
+  const [saved, setSaved] = useState<SavedFounder[]>([]);
+  const [selected, setSelected] = useState<string>('all');
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
-  // New watchlist modal / form
-  const [showCreateModal, setShowCreateModal] = useState<boolean>(false);
-  const [newName, setNewName] = useState<string>('');
-  const [newDesc, setNewDesc] = useState<string>('');
-  const [newColor, setNewColor] = useState<string>('indigo');
-  const [creating, setCreating] = useState<boolean>(false);
+  const [creatingOpen, setCreatingOpen] = useState(false);
+  const [newName, setNewName] = useState('');
+  const [newDesc, setNewDesc] = useState('');
+  const [creating, setCreating] = useState(false);
 
-  const fetchData = async () => {
-    setLoading(true);
+  const load = async () => {
     try {
-      const [wl, saved] = await Promise.all([
-        api.getWatchlists(),
-        api.getSavedFounders(),
-      ]);
+      const [wl, sf] = await Promise.all([api.getWatchlists(), api.getSavedFounders()]);
       setWatchlists(wl);
-      setSavedFounders(saved);
+      setSaved(sf);
+      setError(null);
     } catch (err) {
-      console.error(err);
+      setError(errorMessage(err, 'Saved founders could not be loaded.'));
     } finally {
       setLoading(false);
     }
   };
 
   useEffect(() => {
-    fetchData();
+    load();
   }, []);
 
-  const handleCreateWatchlist = async (e: React.FormEvent) => {
+  const createList = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newName.trim()) return;
     setCreating(true);
     try {
-      await api.createWatchlist({
-        name: newName.trim(),
-        description: newDesc.trim() || undefined,
-        color: newColor,
-      });
+      const created = await api.createWatchlist({ name: newName.trim(), description: newDesc.trim() || undefined });
       setNewName('');
       setNewDesc('');
-      setShowCreateModal(false);
-      fetchData();
+      setCreatingOpen(false);
+      setSelected(created.id);
+      await load();
     } catch (err) {
-      console.error(err);
+      setError(errorMessage(err, 'The list could not be created.'));
     } finally {
       setCreating(false);
     }
   };
 
-  const handleRemoveSaved = async (profileId: string, e: React.MouseEvent) => {
-    e.stopPropagation();
+  const removeFounder = async (f: SavedFounder) => {
+    if (!window.confirm(`Remove ${f.name} and their notes from your saved founders?`)) return;
     try {
-      await api.removeSavedFounder(profileId);
-      setSavedFounders(savedFounders.filter((f) => f.profile_id !== profileId));
-      fetchData();
+      await api.removeSavedFounder(f.profile_id);
+      await load();
     } catch (err) {
-      console.error(err);
+      setError(errorMessage(err, 'Could not remove this founder.'));
     }
   };
 
-  const filteredFounders = selectedWatchlistId === 'all'
-    ? savedFounders
-    : savedFounders.filter((f) => f.watchlist_ids.includes(selectedWatchlistId));
+  const removeFromList = async (f: SavedFounder, listId: string) => {
+    try {
+      await api.removeFromWatchlist(listId, f.profile_id);
+      await load();
+    } catch (err) {
+      setError(errorMessage(err, 'Could not update the list.'));
+    }
+  };
+
+  const listName = (id: string) => watchlists.find((w) => w.id === id)?.name;
+  const visible = selected === 'all' ? saved : saved.filter((f) => f.watchlist_ids.includes(selected));
+  const current = watchlists.find((w) => w.id === selected);
 
   return (
-    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-6">
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-bold text-white tracking-tight">Watchlists & Saved Candidates</h1>
-          <p className="text-sm text-slate-400 mt-1">
-            Organize discovered founders across custom sectors, investment theses, or diligence pipelines.
-          </p>
-        </div>
-
-        <button
-          onClick={() => setShowCreateModal(true)}
-          className="px-4 py-2 rounded-xl text-xs font-medium bg-indigo-600 hover:bg-indigo-500 text-white transition-colors flex items-center gap-1.5 shadow-lg shadow-indigo-600/30 self-start sm:self-auto"
-        >
-          <Plus className="w-3.5 h-3.5" />
-          <span>New Watchlist</span>
-        </button>
-      </div>
-
-      {/* Watchlist Tabs */}
-      <div className="flex flex-wrap items-center gap-2 pb-2 border-b border-white/5">
-        <button
-          onClick={() => setSelectedWatchlistId('all')}
-          className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${
-            selectedWatchlistId === 'all'
-              ? 'bg-white/10 text-white font-semibold'
-              : 'bg-white/[0.02] text-slate-400 hover:text-slate-200 hover:bg-white/[0.05]'
-          }`}
-        >
-          All Saved ({savedFounders.length})
-        </button>
-
-        {watchlists.map((wl) => (
-          <button
-            key={wl.id}
-            onClick={() => setSelectedWatchlistId(wl.id)}
-            className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors flex items-center gap-1.5 ${
-              selectedWatchlistId === wl.id
-                ? 'bg-white/10 text-white font-semibold'
-                : 'bg-white/[0.02] text-slate-400 hover:text-slate-200 hover:bg-white/[0.05]'
-            }`}
-          >
-            <span>{wl.name}</span>
-            <span className="text-[10px] font-mono px-1.5 rounded bg-white/5 text-slate-400">
-              {wl.member_count}
-            </span>
+    <div className="mx-auto max-w-6xl space-y-6 px-4 py-8 sm:px-6">
+      <PageHeader
+        title="Watchlists"
+        description="Founders you saved, grouped into lists, with your notes and whether research has been run."
+        actions={
+          <button onClick={() => setCreatingOpen(!creatingOpen)} className="btn btn-secondary">
+            <Plus className="h-4 w-4" strokeWidth={1.75} aria-hidden />
+            New list
           </button>
-        ))}
-      </div>
+        }
+      />
 
-      {/* Main Content Area */}
-      {loading ? (
-        <div className="text-center py-16">
-          <Loader2 className="w-8 h-8 text-indigo-500 animate-spin mx-auto" />
-        </div>
-      ) : filteredFounders.length === 0 ? (
-        <EmptyState
-          type="watchlist"
-          title="Watchlist is Empty"
-          description="You haven't saved any founders to this watchlist yet. Use the Discover portal to search and add promising founders."
-          actionText="Discover Founders"
-          onAction={onNavigateToDiscover}
-        />
-      ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {filteredFounders.map((f) => (
-            <div
-              key={f.id}
-              onClick={() => onOpenDossier(f.profile_id)}
-              className="glass-card glass-card-hover rounded-xl p-5 border border-white/5 cursor-pointer flex flex-col justify-between group"
-            >
-              <div>
-                <div className="flex items-start justify-between gap-3 mb-2">
-                  <h3 className="text-base font-semibold text-white group-hover:text-indigo-400 transition-colors">
-                    {f.name}
-                  </h3>
-                  <button
-                    onClick={(e) => handleRemoveSaved(f.profile_id, e)}
-                    className="p-1.5 text-slate-500 hover:text-rose-400 transition-colors rounded hover:bg-white/5"
-                    title="Remove from saved"
-                  >
-                    <Trash2 className="w-3.5 h-3.5" />
-                  </button>
-                </div>
-
-                <p className="text-xs text-indigo-300 mb-2">
-                  {f.current_title || 'Founder'} {f.current_company && `at ${f.current_company}`}
-                </p>
-
-                {f.headline && (
-                  <p className="text-xs text-slate-400 line-clamp-2 mb-3 leading-relaxed">
-                    {f.headline}
-                  </p>
-                )}
-
-                {f.location && (
-                  <div className="flex items-center gap-1 text-[11px] text-slate-500 mb-3">
-                    <MapPin className="w-3 h-3" />
-                    <span>{f.location}</span>
-                  </div>
-                )}
-
-                {f.notes && (
-                  <div className="p-2.5 rounded-lg bg-white/[0.02] border border-white/5 text-xs text-slate-300 line-clamp-2 mb-3">
-                    <span className="text-[10px] uppercase font-mono text-slate-500 block mb-0.5">Note:</span>
-                    {f.notes}
-                  </div>
-                )}
-              </div>
-
-              <div className="pt-3 border-t border-white/5 flex items-center justify-between text-xs text-slate-400">
-                <span className="text-[11px] font-mono text-slate-500">
-                  Added {f.created_at.slice(0, 10)}
-                </span>
-                <span className="text-indigo-400 font-medium flex items-center gap-1 group-hover:translate-x-0.5 transition-transform">
-                  <span>Open Dossier</span>
-                  <ArrowRight className="w-3 h-3" />
-                </span>
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
-
-      {/* Create Watchlist Modal */}
-      {showCreateModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm">
-          <div className="glass-panel w-full max-w-md rounded-2xl border border-white/10 p-6 shadow-2xl space-y-4">
-            <h3 className="text-base font-semibold text-white">Create New Watchlist</h3>
-            <form onSubmit={handleCreateWatchlist} className="space-y-4">
-              <div>
-                <label className="block text-xs font-medium text-slate-300 mb-1">Name</label>
-                <input
-                  type="text"
-                  placeholder="e.g. European AI Spinouts"
-                  value={newName}
-                  onChange={(e) => setNewName(e.target.value)}
-                  className="w-full px-3 py-2 text-xs rounded-lg bg-white/[0.04] border border-white/10 text-slate-200 focus:outline-none focus:border-indigo-500"
-                  required
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-medium text-slate-300 mb-1">Description (Optional)</label>
-                <input
-                  type="text"
-                  placeholder="e.g. Founders emerging from top labs in Europe"
-                  value={newDesc}
-                  onChange={(e) => setNewDesc(e.target.value)}
-                  className="w-full px-3 py-2 text-xs rounded-lg bg-white/[0.04] border border-white/10 text-slate-200 focus:outline-none focus:border-indigo-500"
-                />
-              </div>
-
-              <div className="flex justify-end gap-2 pt-2">
-                <button
-                  type="button"
-                  onClick={() => setShowCreateModal(false)}
-                  className="px-4 py-2 rounded-xl text-xs font-medium text-slate-400 hover:text-white"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  disabled={creating}
-                  className="px-4 py-2 rounded-xl text-xs font-medium bg-indigo-600 hover:bg-indigo-500 text-white font-medium shadow-lg shadow-indigo-600/30"
-                >
-                  {creating ? 'Creating...' : 'Create Watchlist'}
-                </button>
-              </div>
-            </form>
+      {creatingOpen && (
+        <form onSubmit={createList} className="panel flex flex-col gap-3 p-4 sm:flex-row sm:items-end">
+          <label className="block flex-1">
+            <span className="mb-1 block text-[13px] font-medium text-ink-2">Name</span>
+            <input value={newName} onChange={(e) => setNewName(e.target.value)} className="field" autoFocus required />
+          </label>
+          <label className="block flex-[2]">
+            <span className="mb-1 block text-[13px] font-medium text-ink-2">Description (optional)</span>
+            <input value={newDesc} onChange={(e) => setNewDesc(e.target.value)} className="field" />
+          </label>
+          <div className="flex gap-2">
+            <button type="button" onClick={() => setCreatingOpen(false)} className="btn btn-quiet">
+              Cancel
+            </button>
+            <button type="submit" disabled={creating} className="btn btn-primary">
+              {creating && <Loader2 className="h-4 w-4 animate-spin" aria-hidden />}
+              Create
+            </button>
           </div>
-        </div>
+        </form>
       )}
+
+      {error && <Notice>{error}</Notice>}
+
+      <div className="grid grid-cols-1 gap-6 md:grid-cols-[220px_minmax(0,1fr)]">
+        <nav aria-label="Watchlists" className="flex gap-1 overflow-x-auto md:flex-col md:overflow-visible">
+          {[{ id: 'all', name: 'All saved', member_count: saved.length }, ...watchlists].map((wl) => (
+            <button
+              key={wl.id}
+              onClick={() => setSelected(wl.id)}
+              aria-current={selected === wl.id ? 'true' : undefined}
+              className={`flex shrink-0 items-center justify-between gap-3 rounded-md px-3 py-2 text-left text-[14px] transition-colors ${
+                selected === wl.id ? 'bg-surface-2 font-medium text-ink' : 'text-ink-2 hover:bg-surface-2/60'
+              }`}
+            >
+              <span className="truncate">{wl.name}</span>
+              <span className="tabular text-[12px] text-ink-3">{wl.member_count}</span>
+            </button>
+          ))}
+        </nav>
+
+        <div className="min-w-0 space-y-3">
+          {current?.description && <p className="text-[14px] text-ink-2">{current.description}</p>}
+
+          {loading ? (
+            <div className="panel overflow-hidden">
+              <SkeletonCard />
+              <SkeletonCard />
+            </div>
+          ) : visible.length === 0 ? (
+            <EmptyState
+              type="watchlist"
+              title={selected === 'all' ? 'Nothing saved yet' : 'This list is empty'}
+              description={
+                selected === 'all'
+                  ? 'Save founders from search results or a dossier. Saved founders and notes are stored locally in SQLite.'
+                  : 'Add founders to this list from the Save dialog on a result or dossier.'
+              }
+              actionText="Find founders"
+              onAction={() => navigate(paths.discover())}
+            />
+          ) : (
+            <ul className="panel divide-y divide-line">
+              {visible.map((f) => (
+                <li key={f.id} className="px-4 py-4 sm:px-5">
+                  <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                    <div className="min-w-0">
+                      <a href={paths.profile(f.profile_id)} className="text-[16px] font-semibold text-ink hover:text-accent">
+                        {f.name}
+                      </a>
+                      <p className="text-[14px] text-ink-2">
+                        {f.current_title || 'No title saved'}
+                        {f.current_company && <> at {f.current_company}</>}
+                        {isKnownLocation(f.location) && <span className="text-ink-3">, {f.location}</span>}
+                      </p>
+                    </div>
+                    <div className="flex shrink-0 items-center gap-2 text-[12px]">
+                      {f.researched_at ? (
+                        <span className="rounded-[4px] bg-ai-soft px-1.5 py-px font-medium text-ai">
+                          Researched {relativeTime(f.researched_at)}
+                        </span>
+                      ) : (
+                        <span className="rounded-[4px] bg-muted-soft px-1.5 py-px text-ink-2">Not researched</span>
+                      )}
+                      <button
+                        onClick={() => removeFounder(f)}
+                        className="btn btn-quiet min-h-8 px-2"
+                        aria-label={`Remove ${f.name}`}
+                        title="Remove from saved founders"
+                      >
+                        <Trash2 className="h-4 w-4" strokeWidth={1.75} />
+                      </button>
+                    </div>
+                  </div>
+
+                  {f.notes && (
+                    <p className="mt-2 max-w-[70ch] border-l-2 border-line-strong pl-3 text-[14px] text-ink-2">{f.notes}</p>
+                  )}
+
+                  <div className="mt-2.5 flex flex-wrap items-center gap-1.5 text-[12px]">
+                    {f.watchlist_ids.map((id) => (
+                      <span key={id} className="inline-flex items-center gap-1 rounded-[4px] border border-line px-1.5 py-px text-ink-2">
+                        {listName(id) || id}
+                        <button
+                          onClick={() => removeFromList(f, id)}
+                          className="text-ink-3 hover:text-ink"
+                          aria-label={`Remove ${f.name} from ${listName(id) || 'list'}`}
+                        >
+                          <X className="h-3 w-3" strokeWidth={2} />
+                        </button>
+                      </span>
+                    ))}
+                    <span className="text-ink-3">Saved {relativeTime(f.created_at)}</span>
+                    <a href={paths.research(f.profile_id)} className="link ml-auto">
+                      Research
+                    </a>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      </div>
     </div>
   );
 };

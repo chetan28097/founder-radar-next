@@ -1,309 +1,322 @@
-import React, { useState, useEffect } from 'react';
-import { Search, Filter, RotateCcw, Building2, MapPin, Briefcase, ArrowRight, Sparkles, ChevronRight } from 'lucide-react';
-import { FounderProfile, SearchResponse } from '../types';
+import React, { useEffect, useState } from 'react';
+import { Search, RotateCcw, Loader2 } from 'lucide-react';
+import { FounderProfile, RecentSearch } from '../types';
 import { api } from '../services/api';
 import { FounderCard } from '../components/FounderCard';
 import { SkeletonCard } from '../components/SkeletonLoader';
 import { EmptyState } from '../components/EmptyState';
 import { SaveModal } from '../components/SaveModal';
+import { Notice, PageHeader } from '../components/ui';
+import { errorMessage, relativeTime } from '../lib/format';
+import { EMPTY_PARAMS, SearchParams, paramsFromRecent, takePendingSearch } from '../lib/discoverStore';
 
-interface DiscoverPageProps {
-  initialQuery?: string;
-  initialEmployer?: string;
-  onOpenDossier: (profileId: string) => void;
-  onDraftOutreach: (profile: FounderProfile) => void;
+interface ResultsState {
+  params: SearchParams;
+  profiles: FounderProfile[];
+  totalCount?: number;
+  nextCursor?: string;
+  interpretation?: string;
+  appliedFilters: Record<string, unknown>;
 }
 
-export const DiscoverPage: React.FC<DiscoverPageProps> = ({
-  initialQuery = '',
-  initialEmployer = '',
-  onOpenDossier,
-  onDraftOutreach,
-}) => {
-  const [query, setQuery] = useState<string>(initialQuery);
-  const [employer, setEmployer] = useState<string>(initialEmployer);
-  const [role, setRole] = useState<string>('Founder');
-  const [location, setLocation] = useState<string>('');
-  const [limit, setLimit] = useState<number>(10);
-  const [cursor, setCursor] = useState<string | undefined>(undefined);
-  const [nextCursor, setNextCursor] = useState<string | undefined>(undefined);
+// Kept for the lifetime of the tab so returning from a dossier restores the list
+// instead of spending another Crustdata request.
+let cachedForm: SearchParams = EMPTY_PARAMS;
+let cachedResults: ResultsState | null = null;
 
-  const [profiles, setProfiles] = useState<FounderProfile[]>([]);
-  const [totalCount, setTotalCount] = useState<number | undefined>(undefined);
-  const [queryInterpretation, setQueryInterpretation] = useState<string | undefined>(undefined);
-  const [loading, setLoading] = useState<boolean>(false);
+const PRESETS: { label: string; params: Partial<SearchParams> }[] = [
+  { label: 'Ex-Stripe founders', params: { employer: 'Stripe' } },
+  { label: 'Ex-Google founders', params: { employer: 'Google' } },
+  { label: 'Founders in Bengaluru', params: { location: 'Bengaluru' } },
+  { label: 'Ex-Revolut founders in London', params: { employer: 'Revolut', location: 'London' } },
+  { label: 'Heads of Product in Bengaluru', params: { role: 'Head of Product', location: 'Bengaluru' } },
+  { label: 'Staff engineers, ex-Google', params: { role: 'Staff Engineer', employer: 'Google' } },
+];
+
+const FILTER_LABELS: Record<string, string> = {
+  current_title: 'Current title',
+  previous_employer: 'Past employer',
+  location: 'Location',
+  country: 'Country',
+};
+
+export const DiscoverPage: React.FC = () => {
+  const [form, setForm] = useState<SearchParams>(cachedForm);
+  const [results, setResults] = useState<ResultsState | null>(cachedResults);
+  const [loading, setLoading] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
-
-  // Save Modal State
-  const [savingProfile, setSavingProfile] = useState<FounderProfile | null>(null);
+  const [recent, setRecent] = useState<RecentSearch[]>([]);
   const [savedIds, setSavedIds] = useState<Set<string>>(new Set());
+  const [savingProfile, setSavingProfile] = useState<FounderProfile | null>(null);
 
-  // Quick preset pills
-  const presets = [
-    { label: 'Ex-Stripe Founders', employer: 'Stripe', role: 'Founder' },
-    { label: 'Ex-Google AI Builders', employer: 'Google', role: 'Founder' },
-    { label: 'Ex-Meta Leaders in SF', employer: 'Meta', location: 'San Francisco' },
-    { label: 'Fintech Spinouts (London)', employer: 'Revolut', location: 'London' },
-  ];
+  useEffect(() => {
+    cachedForm = form;
+  }, [form]);
+  useEffect(() => {
+    cachedResults = results;
+  }, [results]);
 
-  const executeSearch = async (newCursor?: string) => {
-    setLoading(true);
+  const runSearch = async (params: SearchParams, cursor?: string) => {
+    const append = Boolean(cursor);
+    if (append) setLoadingMore(true);
+    else setLoading(true);
     setError(null);
     try {
       const res = await api.searchFounders({
-        query: query.trim() || undefined,
-        employer: employer.trim() || undefined,
-        role: role.trim() || undefined,
-        location: location.trim() || undefined,
-        limit,
-        cursor: newCursor,
+        query: params.query.trim() || undefined,
+        employer: params.employer.trim() || undefined,
+        role: params.role.trim() || undefined,
+        location: params.location.trim() || undefined,
+        country: params.country.trim() || undefined,
+        limit: params.limit,
+        cursor,
       });
-
-      setProfiles(res.profiles);
-      setTotalCount(res.total_count);
-      setNextCursor(res.next_cursor);
-      setQueryInterpretation(res.query_interpretation);
-    } catch (err: any) {
-      setError(err.message || 'Failed to search founders from Crustdata API');
+      setResults((prev) => {
+        const base = append && prev ? prev.profiles : [];
+        const seen = new Set(base.map((p) => p.id));
+        const merged = [...base, ...res.profiles.filter((p) => !seen.has(p.id))];
+        return {
+          params,
+          profiles: merged,
+          totalCount: res.total_count,
+          nextCursor: res.next_cursor,
+          interpretation: res.query_interpretation,
+          appliedFilters: res.applied_filters || {},
+        };
+      });
+      if (!append) api.getRecentSearches().then(setRecent).catch(() => undefined);
+    } catch (err) {
+      setError(errorMessage(err, 'The search failed.'));
     } finally {
       setLoading(false);
+      setLoadingMore(false);
     }
   };
 
   useEffect(() => {
-    executeSearch();
-    // Fetch saved profiles to highlight saved status
-    api.getSavedFounders().then((saved) => {
-      setSavedIds(new Set(saved.map((s) => s.profile_id)));
-    }).catch(console.error);
+    api.getSavedFounders().then((s) => setSavedIds(new Set(s.map((f) => f.profile_id)))).catch(() => undefined);
+    api.getRecentSearches().then(setRecent).catch(() => undefined);
+    const pending = takePendingSearch();
+    if (pending) {
+      const params = { ...EMPTY_PARAMS, ...pending };
+      setForm(params);
+      runSearch(params);
+    }
+    // runSearch is stable in behaviour; this effect intentionally runs once on mount
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const handleSearchSubmit = (e: React.FormEvent) => {
+  const update = (key: keyof SearchParams) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) =>
+    setForm({ ...form, [key]: key === 'limit' ? Number(e.target.value) : e.target.value });
+
+  const submit = (e: React.FormEvent) => {
     e.preventDefault();
-    setCursor(undefined);
-    executeSearch();
+    runSearch(form);
   };
 
-  const handleResetFilters = () => {
-    setQuery('');
-    setEmployer('');
-    setRole('Founder');
-    setLocation('');
-    setCursor(undefined);
-    setLimit(10);
+  const applyPreset = (preset: Partial<SearchParams>) => {
+    const params = { ...EMPTY_PARAMS, limit: form.limit, ...preset };
+    setForm(params);
+    runSearch(params);
   };
 
-  const handleApplyPreset = (p: typeof presets[0]) => {
-    if (p.employer) setEmployer(p.employer);
-    if (p.role) setRole(p.role);
-    if (p.location) setLocation(p.location);
-    setQuery(`Ex-${p.employer || ''} ${p.role || 'founders'} ${p.location ? 'in ' + p.location : ''}`.trim());
-    setTimeout(() => executeSearch(), 50);
+  const reset = () => {
+    setForm(EMPTY_PARAMS);
+    setResults(null);
+    setError(null);
   };
+
+  const filterChips = Object.entries(results?.appliedFilters || {}).filter(([k]) => k !== 'cursor');
+  const recentUnique = recent.filter(
+    (r, i, all) => all.findIndex((x) => x.query === r.query && JSON.stringify(x.filters) === JSON.stringify(r.filters)) === i,
+  );
 
   return (
-    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-6">
-      {/* Header */}
-      <div>
-        <h1 className="text-2xl font-bold text-white tracking-tight">Discover Founders</h1>
-        <p className="text-sm text-slate-400 mt-1">
-          Search real professional profiles via Crustdata People Search, identify career transitions, and investigate candidates.
-        </p>
-      </div>
+    <div className="mx-auto max-w-6xl space-y-6 px-4 py-8 sm:px-6">
+      <PageHeader
+        title="Discover founders and professionals"
+        description="Search Crustdata's people index by current title, past employer and location. Founder is the default title; change it to find any role. Describe who you are looking for, or set filters directly."
+      />
 
-      {/* Search Input & Filter Controls */}
-      <div className="glass-panel rounded-2xl p-6 border border-white/10 shadow-xl space-y-4">
-        {/* Main Natural Language Input */}
-        <form onSubmit={handleSearchSubmit} className="flex gap-2">
-          <div className="relative flex-1">
-            <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
+      <form onSubmit={submit} className="panel space-y-4 p-4 sm:p-5">
+        <div className="flex flex-col gap-2 sm:flex-row">
+          <label className="relative flex-1">
+            <span className="sr-only">Describe the founders you want to find</span>
+            <Search
+              className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-ink-3"
+              strokeWidth={1.75}
+              aria-hidden
+            />
             <input
               type="text"
-              placeholder="e.g. Find founders who previously worked at Stripe and recently transitioned..."
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              className="w-full pl-10 pr-4 py-2.5 rounded-xl bg-white/[0.04] border border-white/10 text-sm text-slate-200 placeholder-slate-500 focus:outline-none focus:border-indigo-500"
+              value={form.query}
+              onChange={update('query')}
+              placeholder="e.g. founders who previously worked at Stripe in San Francisco"
+              className="field h-11 pl-9 text-[15px]"
             />
-          </div>
-          <button
-            type="submit"
-            disabled={loading}
-            className="px-6 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-medium transition-colors flex items-center gap-1.5 shadow-lg shadow-indigo-600/30 disabled:opacity-50"
-          >
-            <span>Search</span>
-            <ArrowRight className="w-4 h-4" />
+          </label>
+          <button type="submit" disabled={loading} className="btn btn-primary h-11 px-5">
+            {loading && <Loader2 className="h-4 w-4 animate-spin" aria-hidden />}
+            Search
           </button>
-        </form>
+        </div>
 
-        {/* Explicit Filter Controls */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 pt-2">
-          <div>
-            <label className="block text-xs font-medium text-slate-400 mb-1">Previous / Target Employer</label>
-            <div className="relative">
-              <Building2 className="w-3.5 h-3.5 text-slate-500 absolute left-3 top-1/2 -translate-y-1/2" />
-              <input
-                type="text"
-                placeholder="e.g. Stripe, Google, Meta"
-                value={employer}
-                onChange={(e) => setEmployer(e.target.value)}
-                className="w-full pl-9 pr-3 py-1.5 text-xs rounded-lg bg-white/[0.03] border border-white/10 text-slate-200 focus:outline-none focus:border-indigo-500"
-              />
-            </div>
-          </div>
-
-          <div>
-            <label className="block text-xs font-medium text-slate-400 mb-1">Current Title / Role</label>
-            <div className="relative">
-              <Briefcase className="w-3.5 h-3.5 text-slate-500 absolute left-3 top-1/2 -translate-y-1/2" />
-              <input
-                type="text"
-                placeholder="e.g. Founder, Co-Founder, CEO"
-                value={role}
-                onChange={(e) => setRole(e.target.value)}
-                className="w-full pl-9 pr-3 py-1.5 text-xs rounded-lg bg-white/[0.03] border border-white/10 text-slate-200 focus:outline-none focus:border-indigo-500"
-              />
-            </div>
-          </div>
-
-          <div>
-            <label className="block text-xs font-medium text-slate-400 mb-1">Location / Country</label>
-            <div className="relative">
-              <MapPin className="w-3.5 h-3.5 text-slate-500 absolute left-3 top-1/2 -translate-y-1/2" />
-              <input
-                type="text"
-                placeholder="e.g. San Francisco, London, India"
-                value={location}
-                onChange={(e) => setLocation(e.target.value)}
-                className="w-full pl-9 pr-3 py-1.5 text-xs rounded-lg bg-white/[0.03] border border-white/10 text-slate-200 focus:outline-none focus:border-indigo-500"
-              />
-            </div>
-          </div>
-
-          <div className="flex items-end gap-2">
-            <div className="flex-1">
-              <label className="block text-xs font-medium text-slate-400 mb-1">Results Limit</label>
-              <select
-                value={limit}
-                onChange={(e) => setLimit(Number(e.target.value))}
-                className="w-full px-3 py-1.5 text-xs rounded-lg bg-white/[0.03] border border-white/10 text-slate-200 focus:outline-none focus:border-indigo-500"
-              >
-                <option value={5} className="bg-slate-900">5 profiles</option>
-                <option value={10} className="bg-slate-900">10 profiles</option>
-                <option value={20} className="bg-slate-900">20 profiles</option>
+        <div className="grid grid-cols-2 gap-3 lg:grid-cols-5">
+          {(
+            [
+              ['employer', 'Past employer', 'Stripe, Google'],
+              ['role', 'Current title contains', 'Founder'],
+              ['location', 'Location', 'London, Bengaluru'],
+              ['country', 'Country', 'India'],
+            ] as const
+          ).map(([key, label, placeholder]) => (
+            <label key={key} className="block">
+              <span className="mb-1 block text-[13px] font-medium text-ink-2">{label}</span>
+              <input value={form[key]} onChange={update(key)} placeholder={placeholder} className="field" />
+            </label>
+          ))}
+          <div className="col-span-2 flex items-end gap-2 lg:col-span-1">
+            <label className="block flex-1">
+              <span className="mb-1 block text-[13px] font-medium text-ink-2">Per page</span>
+              <select value={form.limit} onChange={update('limit')} className="field">
+                {[5, 10, 20].map((n) => (
+                  <option key={n} value={n}>
+                    {n}
+                  </option>
+                ))}
               </select>
-            </div>
-            <button
-              type="button"
-              onClick={handleResetFilters}
-              className="p-2 rounded-lg bg-white/[0.03] hover:bg-white/[0.08] border border-white/10 text-slate-400 hover:text-slate-200 transition-colors"
-              title="Reset Filters"
-            >
-              <RotateCcw className="w-3.5 h-3.5" />
+            </label>
+            <button type="button" onClick={reset} className="btn btn-secondary px-2.5" title="Clear filters and results">
+              <RotateCcw className="h-4 w-4" strokeWidth={1.75} />
+              <span className="sr-only">Reset</span>
             </button>
           </div>
         </div>
 
-        {/* Preset Query Chips */}
-        <div className="flex flex-wrap items-center gap-2 pt-2 border-t border-white/5 text-xs">
-          <span className="text-slate-500 flex items-center gap-1">
-            <Sparkles className="w-3 h-3 text-cyan-400" />
-            <span>Target Queries:</span>
-          </span>
-          {presets.map((p, idx) => (
+        <div className="flex flex-wrap items-center gap-2 border-t border-line pt-3">
+          <span className="text-[13px] text-ink-3">Try</span>
+          {PRESETS.map((p) => (
             <button
-              key={idx}
+              key={p.label}
               type="button"
-              onClick={() => handleApplyPreset(p)}
-              className="px-2.5 py-1 rounded-lg bg-white/[0.03] hover:bg-white/[0.08] border border-white/5 text-slate-300 hover:text-white transition-colors"
+              disabled={loading}
+              onClick={() => applyPreset(p.params)}
+              className="rounded-md border border-line px-2.5 py-1 text-[13px] text-ink-2 transition-colors hover:border-line-strong hover:text-ink"
             >
               {p.label}
             </button>
           ))}
         </div>
-      </div>
+      </form>
 
-      {/* Query Interpretation Banner & Results Summary */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs text-slate-400">
-        <div>
-          {queryInterpretation ? (
-            <span className="font-mono bg-white/[0.02] border border-white/5 px-3 py-1 rounded-md text-indigo-300">
-              Query: {queryInterpretation}
-            </span>
-          ) : (
-            <span>Showing verified candidate profiles from Crustdata People Search</span>
-          )}
-        </div>
-        <div className="flex items-center gap-2">
-          {totalCount !== undefined && (
-            <span className="font-mono text-slate-300 font-medium">
-              {totalCount.toLocaleString()} matching in global database
-            </span>
-          )}
-          <span>·</span>
-          <span>{profiles.length} returned on page</span>
-        </div>
-      </div>
-
-      {/* Error state */}
       {error && (
-        <div className="p-4 rounded-xl bg-rose-950/40 border border-rose-500/30 text-rose-300 text-xs">
-          <strong>Search Error:</strong> {error}
+        <Notice
+          action={
+            <button className="btn btn-secondary" onClick={() => runSearch(results?.params || form)}>
+              Try again
+            </button>
+          }
+        >
+          <strong className="font-semibold">Search failed.</strong> {error}
+        </Notice>
+      )}
+
+      {results && !loading && (
+        <div className="flex flex-col gap-2 text-[13px] text-ink-2 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex flex-wrap items-center gap-1.5">
+            <span className="text-ink-3">Filters sent to Crustdata:</span>
+            {filterChips.map(([k, v]) => (
+              <span key={k} className="rounded-[4px] bg-surface-2 px-1.5 py-px">
+                {FILTER_LABELS[k] || k}: <span className="font-medium text-ink">{String(v)}</span>
+              </span>
+            ))}
+          </div>
+          <span className="tabular shrink-0">
+            {results.profiles.length} shown
+            {typeof results.totalCount === 'number' && <> of {results.totalCount.toLocaleString()} matches</>}
+          </span>
         </div>
       )}
 
-      {/* Results Grid */}
       {loading ? (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {[...Array(6)].map((_, i) => (
+        <div className="panel overflow-hidden">
+          {Array.from({ length: 5 }).map((_, i) => (
             <SkeletonCard key={i} />
           ))}
         </div>
-      ) : profiles.length === 0 ? (
+      ) : results && results.profiles.length === 0 ? (
         <EmptyState
-          type="search"
-          title="No Matching Founders Found"
-          description="Try broadening your employer, title, or location criteria to surface candidates across global geographies."
-          actionText="Reset Filters"
-          onAction={handleResetFilters}
+          title="No one matched"
+          description="Crustdata returned no profiles for these filters. Try a broader location, drop the past employer, or search by country."
+          actionText="Clear filters"
+          onAction={reset}
         />
+      ) : results ? (
+        <>
+          <div className="panel overflow-hidden">
+            {results.profiles.map((profile) => (
+              <FounderCard
+                key={profile.id}
+                profile={profile}
+                isSaved={savedIds.has(profile.id)}
+                onSave={setSavingProfile}
+              />
+            ))}
+          </div>
+          {results.nextCursor && (
+            <div className="flex justify-center">
+              <button
+                onClick={() => runSearch(results.params, results.nextCursor)}
+                disabled={loadingMore}
+                className="btn btn-secondary"
+              >
+                {loadingMore && <Loader2 className="h-4 w-4 animate-spin" aria-hidden />}
+                Load more
+              </button>
+            </div>
+          )}
+        </>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {profiles.map((profile) => (
-            <FounderCard
-              key={profile.id}
-              profile={profile}
-              isSaved={savedIds.has(profile.id)}
-              onOpenDossier={onOpenDossier}
-              onSave={(p) => setSavingProfile(p)}
-              onDraftOutreach={onDraftOutreach}
-            />
-          ))}
+        <div className="grid grid-cols-1 gap-6 md:grid-cols-[1fr_1.2fr]">
+          <div>
+            <h2 className="eyebrow mb-2">How search works</h2>
+            <ul className="space-y-2 text-[14px] text-ink-2">
+              <li>Each search is one Crustdata request. Nothing runs until you press Search.</li>
+              <li>Results only include people whose current title contains the role you set (Founder by default).</li>
+              <li>Leaving a company is never treated as evidence of founding one.</li>
+            </ul>
+          </div>
+          <div>
+            <h2 className="eyebrow mb-2">Recent searches</h2>
+            {recentUnique.length === 0 ? (
+              <p className="text-[14px] text-ink-3">No searches yet.</p>
+            ) : (
+              <ul className="panel divide-y divide-line">
+                {recentUnique.slice(0, 5).map((r) => (
+                  <li key={r.id}>
+                    <button
+                      onClick={() => applyPreset(paramsFromRecent(r))}
+                      className="flex w-full items-center justify-between gap-3 px-4 py-2.5 text-left text-[14px] hover:bg-surface-2/60"
+                    >
+                      <span className="truncate text-ink">{r.query}</span>
+                      <span className="tabular shrink-0 text-[12px] text-ink-3">
+                        {r.result_count} results, {relativeTime(r.created_at)}
+                      </span>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
         </div>
       )}
 
-      {/* Pagination Controls */}
-      {nextCursor && !loading && (
-        <div className="flex justify-center pt-6">
-          <button
-            onClick={() => executeSearch(nextCursor)}
-            className="px-5 py-2.5 rounded-xl text-xs font-medium bg-white/[0.04] hover:bg-white/[0.08] border border-white/10 text-slate-200 transition-colors flex items-center gap-2 shadow-lg"
-          >
-            <span>Load More Results</span>
-            <ChevronRight className="w-3.5 h-3.5" />
-          </button>
-        </div>
-      )}
-
-      {/* Save Modal */}
       <SaveModal
         profile={savingProfile}
         isOpen={Boolean(savingProfile)}
         onClose={() => setSavingProfile(null)}
-        onSuccess={() => {
-          if (savingProfile) {
-            setSavedIds(new Set([...savedIds, savingProfile.id]));
-          }
-        }}
+        onSuccess={() => savingProfile && setSavedIds((prev) => new Set([...prev, savingProfile.id]))}
       />
     </div>
   );

@@ -59,6 +59,25 @@ def _init_db_with_conn(conn: sqlite3.Connection):
     )
     """)
 
+    # Raw Crustdata records for every profile surfaced by search, so dossiers
+    # survive backend restarts without re-querying the provider.
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS profile_cache (
+        profile_id TEXT PRIMARY KEY,
+        raw_json TEXT NOT NULL,
+        fetched_at TEXT NOT NULL
+    )
+    """)
+
+    # Latest on-demand AI research per profile (never generated automatically)
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS research_results (
+        profile_id TEXT PRIMARY KEY,
+        payload_json TEXT NOT NULL,
+        generated_at TEXT NOT NULL
+    )
+    """)
+
     # Seed default watchlists if none exist
     cursor.execute("SELECT COUNT(*) FROM watchlists")
     if cursor.fetchone()[0] == 0:

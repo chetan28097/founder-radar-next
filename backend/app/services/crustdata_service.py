@@ -4,14 +4,49 @@ import logging
 import requests
 from typing import Dict, Any, List, Optional, Tuple
 from app.config import settings
-from app.models.schemas import FounderProfile, CareerPosition, SearchResponse
+from app.models.schemas import (
+    FounderProfile, CareerPosition, SearchResponse, CompanyOverview, EducationEntry
+)
 from app.observability.tracer import trace_span
+from app.repositories.profile_repository import ProfileCacheRepository
 
 logger = logging.getLogger(__name__)
 
-# In-memory cache for profiles by id to prevent redundant upstream API hits
+# In-memory cache for profiles by id to prevent redundant upstream API hits.
+# Raw records are also persisted to SQLite (profile_cache) so dossiers survive restarts.
 _profile_cache: Dict[str, FounderProfile] = {}
 _raw_cache: Dict[str, Dict[str, Any]] = {}
+
+FOUNDER_KEYWORDS = ["founder", "co-founder", "cofounder", "founding"]
+
+
+def _clean_url(value: Any, required_host: Optional[str] = None) -> Optional[str]:
+    """Return an http(s) URL as provided by Crustdata, or None if it is not a usable link."""
+    if not isinstance(value, str) or not value.strip():
+        return None
+    url = value.strip()
+    if not re.match(r"^https?://", url, re.IGNORECASE):
+        if re.match(r"^[\w.-]+\.[a-z]{2,}(/.*)?$", url, re.IGNORECASE):
+            url = f"https://{url}"
+        else:
+            return None
+    host = re.sub(r"^https?://", "", url, flags=re.IGNORECASE).split("/")[0].lower()
+    if required_host and not (host == required_host or host.endswith("." + required_host)):
+        return None
+    return url
+
+
+def _company_matches(company: Optional[str], employer: str) -> bool:
+    """Whole-word match on the company name, ignoring parenthetical notes such as
+    "Orum.io (We've joined Stripe)", which would otherwise read as Stripe experience."""
+    name = re.sub(r"\(.*?\)", " ", company or "").lower()
+    target = employer.strip().lower()
+    return bool(target) and re.search(rf"(?<![\w]){re.escape(target)}(?![\w])", name) is not None
+
+
+def _is_founder_title(title: Optional[str]) -> bool:
+    t = (title or "").lower()
+    return any(kw in t for kw in FOUNDER_KEYWORDS)
 
 
 class CrustdataService:
@@ -225,12 +260,20 @@ class CrustdataService:
 
         with trace_span("profile_normalization", raw_count=len(raw_profiles)):
             normalized_profiles = []
+            seen_ids = set()
             for raw in raw_profiles:
                 norm = cls.normalize_profile(raw, target_employer=effective_employer)
+                # Crustdata can repeat a person across a page; keep the first occurrence
+                if not norm.id or norm.id in seen_ids:
+                    continue
+                seen_ids.add(norm.id)
                 normalized_profiles.append(norm)
-                # Store in memory cache
                 _profile_cache[norm.id] = norm
                 _raw_cache[norm.id] = raw
+                try:
+                    ProfileCacheRepository.upsert_raw(norm.id, raw)
+                except Exception as exc:
+                    logger.warning(f"Could not persist profile {norm.id} to cache: {exc}")
 
         return SearchResponse(
             count=len(normalized_profiles),
@@ -270,49 +313,63 @@ class CrustdataService:
         elif isinstance(location_data, str):
             location_str = location_data
 
-        avatar_url = basic.get("profile_picture_url")
+        avatar_url = _clean_url(basic.get("profile_picture_permalink") or basic.get("profile_picture_url"))
 
-        # Parse current jobs
+        socials = raw.get("social_handles") or {}
+        linkedin_url = _clean_url(
+            (socials.get("professional_network_identifier") or {}).get("profile_url"),
+            required_host="linkedin.com",
+        )
+
+        # Parse current jobs (title left empty when Crustdata has none; never defaulted to "Founder")
         raw_current = employment.get("current") or []
         if isinstance(raw_current, dict):
             raw_current = [raw_current]
-        current_jobs = []
-        primary_company = None
-        for job in raw_current:
-            pos = CareerPosition(
-                company=job.get("name") or "Undisclosed Company",
-                title=job.get("title") or current_title or "Founder",
-                start_date=job.get("start_date"),
-                end_date=None,
-                is_current=True,
-                description=job.get("description"),
-            )
-            current_jobs.append(pos)
-            if not primary_company and job.get("name"):
-                primary_company = job.get("name")
+        current_jobs = [cls._build_position(job, is_current=True) for job in raw_current]
 
         # Parse past jobs
         raw_past = employment.get("past") or []
         if isinstance(raw_past, dict):
             raw_past = [raw_past]
-        past_jobs = []
-        for job in raw_past:
-            pos = CareerPosition(
-                company=job.get("name") or "Previous Company",
-                title=job.get("title") or "Role",
-                start_date=job.get("start_date"),
-                end_date=job.get("end_date"),
-                is_current=False,
-                description=job.get("description"),
-            )
-            past_jobs.append(pos)
+        past_jobs = [cls._build_position(job, is_current=False) for job in raw_past]
+        # Most recent first, by end date when available
+        past_jobs.sort(key=lambda j: j.end_date or "", reverse=True)
 
-        # Detect founder status
-        is_founder = False
-        founder_keywords = ["founder", "co-founder", "founding", "chief executive officer", "ceo"]
-        all_titles = [current_title.lower(), headline.lower()] + [j.title.lower() for j in current_jobs]
-        if any(any(kw in t for kw in founder_keywords) for t in all_titles):
-            is_founder = True
+        # Founder status comes only from explicit founder titles on current roles.
+        # A CEO title or a departure from an employer is not treated as evidence of founding.
+        is_founder = _is_founder_title(current_title) or any(_is_founder_title(j.title) for j in current_jobs)
+
+        # Prefer the current role that carries the founder title as the "current company"
+        primary_job = next((j for j in current_jobs if _is_founder_title(j.title)), None) or (
+            current_jobs[0] if current_jobs else None
+        )
+        primary_company = primary_job.company if primary_job and primary_job.company != "Undisclosed Company" else None
+        company = None
+        if primary_job and primary_company:
+            company = CompanyOverview(
+                name=primary_job.company,
+                title=primary_job.title,
+                start_date=primary_job.start_date,
+                website=primary_job.company_website,
+                linkedin_url=primary_job.company_linkedin_url,
+                logo_url=primary_job.company_logo_url,
+                industries=primary_job.company_industries,
+                headcount=primary_job.company_headcount,
+                headcount_range=primary_job.company_headcount_range,
+                hq=primary_job.company_hq,
+                company_type=primary_job.company_type,
+            )
+
+        education = []
+        for school in ((raw.get("education") or {}).get("schools") or []):
+            if not isinstance(school, dict) or not school.get("school"):
+                continue
+            education.append(EducationEntry(
+                school=school.get("school"),
+                degree=school.get("degree"),
+                start_year=school.get("start_year") if isinstance(school.get("start_year"), int) else None,
+                end_year=school.get("end_year") if isinstance(school.get("end_year"), int) else None,
+            ))
 
         # Grounded transition classification
         transition_status, transition_summary, match_reasons, target_matched = cls._evaluate_transition(
@@ -326,12 +383,8 @@ class CrustdataService:
         tags = []
         if is_founder:
             tags.append("Founder")
-        if target_matched:
+        if target_matched and any(target_matched == j.company for j in past_jobs):
             tags.append(f"Ex-{target_matched}")
-        if transition_status == "verified":
-            tags.append("Verified Transition")
-        elif transition_status == "unverified":
-            tags.append("Pending Timeline Review")
 
         # Calculate data completeness metric
         data_points = [
@@ -350,11 +403,14 @@ class CrustdataService:
             crustdata_id=person_id,
             name=name,
             headline=headline,
-            current_title=current_title or (current_jobs[0].title if current_jobs else "Founder"),
-            current_company=primary_company or (current_jobs[0].company if current_jobs else None),
+            current_title=current_title or (primary_job.title if primary_job and primary_job.title else None),
+            current_company=primary_company,
             location=location_str,
             country=country_str,
             avatar_url=avatar_url,
+            linkedin_url=linkedin_url,
+            company=company,
+            education=education,
             current_jobs=current_jobs,
             past_jobs=past_jobs,
             founder_status=is_founder,
@@ -364,7 +420,62 @@ class CrustdataService:
             match_reasons=match_reasons,
             tags=tags,
             data_completeness=completeness,
+            data_updated_at=(raw.get("metadata") or {}).get("updated_at"),
         )
+
+    @classmethod
+    def _build_position(cls, job: Dict[str, Any], is_current: bool) -> CareerPosition:
+        industries = job.get("company_industries") or []
+        if not isinstance(industries, list):
+            industries = [str(industries)]
+        if not industries and job.get("company_professional_network_industry"):
+            industries = [job.get("company_professional_network_industry")]
+        job_location = job.get("location")
+        if isinstance(job_location, dict):
+            job_location = job_location.get("raw") or job_location.get("full_location")
+        headcount = job.get("company_headcount_latest")
+        return CareerPosition(
+            company=job.get("name") or ("Undisclosed Company" if is_current else "Previous Company"),
+            title=job.get("title") or "",
+            start_date=job.get("start_date"),
+            end_date=None if is_current else job.get("end_date"),
+            is_current=is_current,
+            description=job.get("description"),
+            company_website=_clean_url(job.get("company_website")),
+            company_linkedin_url=_clean_url(job.get("company_professional_network_profile_url"), required_host="linkedin.com"),
+            company_logo_url=_clean_url(job.get("company_profile_picture_permalink")),
+            company_industries=[str(i) for i in industries if i],
+            company_headcount=headcount if isinstance(headcount, int) else None,
+            company_headcount_range=job.get("company_headcount_range"),
+            company_hq=job.get("company_hq_location") or job.get("company_headquarters_country"),
+            company_type=job.get("company_type"),
+            location=job_location if isinstance(job_location, str) else None,
+        )
+
+    @classmethod
+    def compute_data_gaps(cls, profile: FounderProfile) -> List[str]:
+        """Deterministic list of facts missing from the sourced record. Never AI-generated."""
+        gaps = []
+        if not profile.linkedin_url:
+            gaps.append("No LinkedIn profile URL in the Crustdata record.")
+        if not profile.current_company:
+            gaps.append("No current company recorded.")
+        elif profile.company and not profile.company.website:
+            gaps.append(f"No website recorded for {profile.company.name}.")
+        if profile.company and not profile.company.start_date:
+            gaps.append("Start date of the current role is missing.")
+        if not profile.founder_status:
+            gaps.append("No current title says founder, so founding is not established.")
+        undated = [j for j in profile.past_jobs if not (j.start_date and j.end_date)]
+        if undated:
+            gaps.append(f"{len(undated)} of {len(profile.past_jobs)} past roles are missing start or end dates.")
+        if not profile.past_jobs:
+            gaps.append("No past employment recorded.")
+        if not profile.education:
+            gaps.append("No education records.")
+        if not profile.location or profile.location == "Location Unknown":
+            gaps.append("Location unknown.")
+        return gaps
 
     @classmethod
     def _evaluate_transition(
@@ -385,15 +496,8 @@ class CrustdataService:
         target_matched = None
 
         if target_employer:
-            target_norm = target_employer.strip().lower()
-            matching_past = [
-                j for j in past_jobs
-                if target_norm in j.company.lower()
-            ]
-            matching_curr = [
-                j for j in current_jobs
-                if target_norm in j.company.lower()
-            ]
+            matching_past = [j for j in past_jobs if _company_matches(j.company, target_employer)]
+            matching_curr = [j for j in current_jobs if _company_matches(j.company, target_employer)]
 
             if matching_past:
                 target_matched = matching_past[0].company
@@ -405,12 +509,12 @@ class CrustdataService:
         if is_founder:
             curr_names = [j.company for j in current_jobs if j.company and j.company != "Undisclosed Company"]
             company_str = f"at {', '.join(curr_names)}" if curr_names else "in new venture"
-            match_reasons.append(f"Identified as Founder / Executive {company_str}")
+            match_reasons.append(f"Current title includes founder {company_str}")
 
         # Transition classification logic
         if target_employer and target_matched:
-            past_match = next((j for j in past_jobs if target_employer.lower() in j.company.lower()), None)
-            curr_founder_job = next((j for j in current_jobs if any(k in j.title.lower() for k in ["founder", "ceo"])), None)
+            past_match = next((j for j in past_jobs if _company_matches(j.company, target_employer)), None)
+            curr_founder_job = next((j for j in current_jobs if _is_founder_title(j.title)), None)
 
             if past_match and curr_founder_job and past_match.end_date and curr_founder_job.start_date:
                 status = "verified"
@@ -432,10 +536,25 @@ class CrustdataService:
                     f"to establish a verified founder transition timeline."
                 )
         elif is_founder:
-            if past_jobs and any(j.end_date for j in past_jobs) and any(j.start_date for j in current_jobs):
+            founder_job = next((j for j in current_jobs if _is_founder_title(j.title) and j.start_date), None)
+            dated_past = [j for j in past_jobs if j.end_date]
+            if founder_job and dated_past:
                 status = "verified"
-                most_recent_past = past_jobs[0]
-                summary = f"Recorded transition from {most_recent_past.title} at {most_recent_past.company} into current founder venture."
+                founded = founder_job.start_date[:7]
+                before = [j for j in dated_past if j.end_date[:7] <= founded]
+                if before:
+                    prior = max(before, key=lambda j: j.end_date)
+                    summary = (
+                        f"Dated record: {prior.title or 'role'} at {prior.company} ended {prior.end_date[:7]}; "
+                        f"{founder_job.title} at {founder_job.company} started {founded}."
+                    )
+                else:
+                    # Every dated past role ended after the founder role began: report the overlap as recorded
+                    overlap = min(dated_past, key=lambda j: j.end_date)
+                    summary = (
+                        f"Dated record: {founder_job.title} at {founder_job.company} started {founded}, while "
+                        f"{overlap.title or 'a role'} at {overlap.company} continued until {overlap.end_date[:7]}."
+                    )
             elif past_jobs:
                 status = "unverified"
                 summary = "Active founder role supported by title; previous employment history present without complete dates."
@@ -450,8 +569,26 @@ class CrustdataService:
 
     @classmethod
     def get_cached_profile(cls, profile_id: str) -> Optional[FounderProfile]:
-        return _profile_cache.get(profile_id)
+        cached = _profile_cache.get(profile_id)
+        if cached:
+            return cached
+        raw = cls.get_raw_profile(profile_id)
+        if raw:
+            profile = cls.normalize_profile(raw)
+            _profile_cache[profile_id] = profile
+            return profile
+        return None
 
     @classmethod
     def get_raw_profile(cls, profile_id: str) -> Optional[Dict[str, Any]]:
-        return _raw_cache.get(profile_id)
+        raw = _raw_cache.get(profile_id)
+        if raw:
+            return raw
+        try:
+            raw = ProfileCacheRepository.get_raw(profile_id)
+        except Exception as exc:
+            logger.warning(f"Profile cache lookup failed for {profile_id}: {exc}")
+            raw = None
+        if raw:
+            _raw_cache[profile_id] = raw
+        return raw

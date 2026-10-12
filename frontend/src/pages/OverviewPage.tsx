@@ -1,275 +1,168 @@
-import React, { useState, useEffect } from 'react';
-import { Search, Bookmark, Compass, Sparkles, ArrowRight, Clock, Building2, UserCheck, ShieldAlert } from 'lucide-react';
-import { SavedFounder, Watchlist, RecentSearch, FounderProfile, NavigationTab } from '../types';
+import React, { useEffect, useState } from 'react';
+import { Search } from 'lucide-react';
+import { SavedFounder, Watchlist, RecentSearch } from '../types';
 import { api } from '../services/api';
-import { StatusBadge } from '../components/StatusBadge';
+import { Notice, PageHeader } from '../components/ui';
+import { SkeletonBlock } from '../components/SkeletonLoader';
+import { queueDiscoverSearch, paramsFromRecent } from '../lib/discoverStore';
+import { navigate, paths } from '../lib/router';
+import { errorMessage, isKnownLocation, relativeTime } from '../lib/format';
 
-interface OverviewPageProps {
-  onNavigate: (tab: NavigationTab) => void;
-  onOpenDossier: (profileId: string) => void;
-  onRunSearch: (query: string, employer?: string) => void;
-}
-
-export const OverviewPage: React.FC<OverviewPageProps> = ({
-  onNavigate,
-  onOpenDossier,
-  onRunSearch,
-}) => {
-  const [savedFounders, setSavedFounders] = useState<SavedFounder[]>([]);
+export const OverviewPage: React.FC = () => {
+  const [saved, setSaved] = useState<SavedFounder[]>([]);
   const [watchlists, setWatchlists] = useState<Watchlist[]>([]);
-  const [recentSearches, setRecentSearches] = useState<RecentSearch[]>([]);
-  const [loading, setLoading] = useState<boolean>(true);
-  const [quickQuery, setQuickQuery] = useState<string>('');
+  const [recent, setRecent] = useState<RecentSearch[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [query, setQuery] = useState('');
 
   useEffect(() => {
-    Promise.all([
-      api.getSavedFounders().catch(() => []),
-      api.getWatchlists().catch(() => []),
-      api.getRecentSearches().catch(() => []),
-    ])
-      .then(([saved, wl, recents]) => {
-        setSavedFounders(saved);
-        setWatchlists(wl);
-        setRecentSearches(recents);
+    Promise.all([api.getSavedFounders(), api.getWatchlists(), api.getRecentSearches()])
+      .then(([s, w, r]) => {
+        setSaved(s);
+        setWatchlists(w);
+        setRecent(r);
       })
+      .catch((err) => setError(errorMessage(err, 'Workspace data could not be loaded.')))
       .finally(() => setLoading(false));
   }, []);
 
-  const handleQuickSubmit = (e: React.FormEvent) => {
+  const search = (e: React.FormEvent) => {
     e.preventDefault();
-    if (quickQuery.trim()) {
-      onRunSearch(quickQuery.trim());
-      onNavigate('discover');
-    }
+    if (!query.trim()) return;
+    queueDiscoverSearch({ query: query.trim() });
+    navigate(paths.discover());
   };
 
-  const samplePresets = [
-    { label: 'Ex-Stripe Founders', query: 'Ex-Stripe founders', employer: 'Stripe' },
-    { label: 'AI Infrastructure', query: 'AI and infrastructure founders', employer: 'Google' },
-    { label: 'Fintech Spinouts in London', query: 'Fintech founders in London', employer: 'Revolut' },
-    { label: 'Ex-Meta Leaders', query: 'Ex-Meta founders', employer: 'Meta' },
-  ];
+  const researched = saved.filter((f) => f.researched_at).length;
+  const recentUnique = recent.filter(
+    (r, i, all) => all.findIndex((x) => x.query === r.query && JSON.stringify(x.filters) === JSON.stringify(r.filters)) === i,
+  );
 
   return (
-    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-8">
-      {/* Top Welcome / Header */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-bold text-white tracking-tight">Intelligence Overview</h1>
-          <p className="text-sm text-slate-400 mt-1">
-            Track emerging founder signals, active watchlists, and recent investigation queries.
-          </p>
+    <div className="mx-auto max-w-6xl space-y-7 px-4 py-8 sm:px-6">
+      <PageHeader title="Overview" description="Your saved founders, lists and recent searches on this machine." />
+
+      <form onSubmit={search} className="flex flex-col gap-2 sm:flex-row">
+        <label className="relative flex-1">
+          <span className="sr-only">Search for founders</span>
+          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-ink-3" strokeWidth={1.75} aria-hidden />
+          <input
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Search founders, e.g. ex-Google founders in London"
+            className="field h-11 pl-9 text-[15px]"
+          />
+        </label>
+        <button type="submit" className="btn btn-primary h-11 px-5">
+          Search
+        </button>
+      </form>
+
+      {error && <Notice>{error}</Notice>}
+
+      {loading ? (
+        <div className="panel p-5">
+          <SkeletonBlock lines={5} />
         </div>
-        <div className="flex items-center gap-3">
-          <button
-            onClick={() => onNavigate('discover')}
-            className="px-4 py-2 rounded-xl text-xs font-medium bg-indigo-600 hover:bg-indigo-500 text-white transition-colors flex items-center gap-1.5 shadow-lg shadow-indigo-600/25"
-          >
-            <Search className="w-3.5 h-3.5" />
-            <span>Discover Founders</span>
-          </button>
-        </div>
-      </div>
+      ) : (
+        <>
+          <dl className="grid grid-cols-2 divide-line overflow-hidden rounded-[10px] border border-line bg-surface sm:grid-cols-4 sm:divide-x">
+            {[
+              ['Saved founders', saved.length],
+              ['Researched', researched],
+              ['Watchlists', watchlists.length],
+              ['With notes', saved.filter((f) => f.notes?.trim()).length],
+            ].map(([label, value]) => (
+              <div key={label} className="border-line px-5 py-4 [&:nth-child(-n+2)]:border-b sm:[&:nth-child(-n+2)]:border-b-0">
+                <dt className="text-[13px] text-ink-3">{label}</dt>
+                <dd className="tabular mt-0.5 text-[24px] font-semibold text-ink">{value}</dd>
+              </div>
+            ))}
+          </dl>
 
-      {/* Metric Cards Based on Stored Data */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-        <div className="glass-card rounded-2xl p-5 border border-white/5 flex items-center gap-4">
-          <div className="w-12 h-12 rounded-xl bg-indigo-500/10 border border-indigo-500/20 flex items-center justify-center text-indigo-400">
-            <Bookmark className="w-6 h-6" />
-          </div>
-          <div>
-            <span className="text-2xl font-bold text-white">{savedFounders.length}</span>
-            <span className="text-xs text-slate-400 block">Saved Founders in Workspace</span>
-          </div>
-        </div>
-
-        <div className="glass-card rounded-2xl p-5 border border-white/5 flex items-center gap-4">
-          <div className="w-12 h-12 rounded-xl bg-purple-500/10 border border-purple-500/20 flex items-center justify-center text-purple-400">
-            <Compass className="w-6 h-6" />
-          </div>
-          <div>
-            <span className="text-2xl font-bold text-white">{watchlists.length}</span>
-            <span className="text-xs text-slate-400 block">Active Watchlists</span>
-          </div>
-        </div>
-
-        <div className="glass-card rounded-2xl p-5 border border-white/5 flex items-center gap-4">
-          <div className="w-12 h-12 rounded-xl bg-cyan-500/10 border border-cyan-500/20 flex items-center justify-center text-cyan-400">
-            <Clock className="w-6 h-6" />
-          </div>
-          <div>
-            <span className="text-2xl font-bold text-white">{recentSearches.length}</span>
-            <span className="text-xs text-slate-400 block">Recent Search Queries</span>
-          </div>
-        </div>
-      </div>
-
-      {/* Quick Search Launcher */}
-      <div className="glass-panel rounded-2xl p-6 border border-white/10 shadow-xl">
-        <h2 className="text-sm font-semibold text-white mb-2 flex items-center gap-2">
-          <Sparkles className="w-4 h-4 text-cyan-400" />
-          <span>Launch Founder Investigation</span>
-        </h2>
-        <form onSubmit={handleQuickSubmit} className="flex gap-2">
-          <div className="relative flex-1">
-            <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
-            <input
-              type="text"
-              placeholder="e.g. Find founders who previously worked at Stripe and recently transitioned..."
-              value={quickQuery}
-              onChange={(e) => setQuickQuery(e.target.value)}
-              className="w-full pl-10 pr-4 py-2.5 rounded-xl bg-white/[0.04] border border-white/10 text-sm text-slate-200 placeholder-slate-500 focus:outline-none focus:border-indigo-500"
-            />
-          </div>
-          <button
-            type="submit"
-            className="px-5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-medium transition-colors flex items-center gap-1.5"
-          >
-            <span>Search</span>
-            <ArrowRight className="w-4 h-4" />
-          </button>
-        </form>
-
-        {/* Suggestion Chips */}
-        <div className="flex flex-wrap items-center gap-2 mt-4 text-xs">
-          <span className="text-slate-500">Quick Filters:</span>
-          {samplePresets.map((preset, idx) => (
-            <button
-              key={idx}
-              type="button"
-              onClick={() => {
-                onRunSearch(preset.query, preset.employer);
-                onNavigate('discover');
-              }}
-              className="px-2.5 py-1 rounded-lg bg-white/[0.03] hover:bg-white/[0.08] border border-white/5 text-slate-300 transition-colors"
-            >
-              {preset.label}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      {/* Main Grid: Recently Saved Founders & Watchlists */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Saved Profiles (2 Cols) */}
-        <div className="lg:col-span-2 space-y-4">
-          <div className="flex items-center justify-between">
-            <h2 className="text-base font-semibold text-white flex items-center gap-2">
-              <UserCheck className="w-4 h-4 text-indigo-400" />
-              <span>Recently Saved Profiles</span>
-            </h2>
-            <button
-              onClick={() => onNavigate('watchlists')}
-              className="text-xs text-indigo-400 hover:text-indigo-300"
-            >
-              View all watchlists →
-            </button>
-          </div>
-
-          {savedFounders.length === 0 ? (
-            <div className="glass-card rounded-2xl p-8 text-center border border-white/5">
-              <Bookmark className="w-8 h-8 text-slate-600 mx-auto mb-3" />
-              <p className="text-sm text-slate-300 font-medium">No saved founders yet</p>
-              <p className="text-xs text-slate-500 mt-1 max-w-sm mx-auto">
-                Discover founders in the search portal and save them to watchlists to organize your research.
-              </p>
-              <button
-                onClick={() => onNavigate('discover')}
-                className="mt-4 px-4 py-2 rounded-xl text-xs font-medium bg-white/[0.05] hover:bg-white/10 border border-white/10 text-slate-200 transition-colors"
-              >
-                Go to Discover
-              </button>
-            </div>
-          ) : (
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              {savedFounders.slice(0, 4).map((f) => (
-                <div
-                  key={f.id}
-                  onClick={() => onOpenDossier(f.profile_id)}
-                  className="glass-card glass-card-hover rounded-xl p-4 border border-white/5 cursor-pointer space-y-2"
-                >
-                  <div className="flex items-start justify-between">
-                    <div>
-                      <h3 className="text-sm font-semibold text-white group-hover:text-indigo-400">
-                        {f.name}
-                      </h3>
-                      <p className="text-xs text-slate-400 line-clamp-1">
-                        {f.current_title || 'Founder'} {f.current_company && `· ${f.current_company}`}
-                      </p>
-                    </div>
-                  </div>
-                  {f.notes && (
-                    <p className="text-xs text-slate-300 bg-white/[0.02] p-2 rounded border border-white/5 line-clamp-2">
-                      {f.notes}
-                    </p>
-                  )}
-                  <div className="flex items-center justify-between pt-2 border-t border-white/5 text-[11px] text-slate-500">
-                    <span>{f.location || 'Location Unknown'}</span>
-                    <span className="text-indigo-400 hover:underline">Open Dossier →</span>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-
-        {/* Watchlists & Recent Searches Column (1 Col) */}
-        <div className="space-y-6">
-          {/* Watchlists */}
-          <div className="space-y-3">
-            <h2 className="text-base font-semibold text-white flex items-center gap-2">
-              <Compass className="w-4 h-4 text-purple-400" />
-              <span>Watchlists</span>
-            </h2>
-            <div className="glass-card rounded-2xl p-4 border border-white/5 space-y-2">
-              {watchlists.map((wl) => (
-                <div
-                  key={wl.id}
-                  onClick={() => onNavigate('watchlists')}
-                  className="p-2.5 rounded-xl bg-white/[0.02] hover:bg-white/[0.06] border border-white/5 flex items-center justify-between cursor-pointer transition-colors"
-                >
-                  <div>
-                    <h4 className="text-xs font-semibold text-white">{wl.name}</h4>
-                    <p className="text-[11px] text-slate-400 line-clamp-1">{wl.description}</p>
-                  </div>
-                  <span className="text-xs font-mono px-2 py-0.5 rounded-full bg-white/5 text-slate-300">
-                    {wl.member_count}
-                  </span>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          {/* Recent Searches */}
-          <div className="space-y-3">
-            <h2 className="text-base font-semibold text-white flex items-center gap-2">
-              <Clock className="w-4 h-4 text-cyan-400" />
-              <span>Recent Searches</span>
-            </h2>
-            <div className="glass-card rounded-2xl p-4 border border-white/5 space-y-2">
-              {recentSearches.length === 0 ? (
-                <p className="text-xs text-slate-500 text-center py-2">No recent searches yet</p>
+          <div className="grid grid-cols-1 gap-7 lg:grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)]">
+            <section aria-labelledby="recent-saved">
+              <div className="mb-3 flex items-baseline justify-between">
+                <h2 id="recent-saved" className="text-[18px] font-semibold text-ink">
+                  Recently saved
+                </h2>
+                <a href={paths.watchlists()} className="link text-[14px]">
+                  All watchlists
+                </a>
+              </div>
+              {saved.length === 0 ? (
+                <p className="panel px-5 py-6 text-[14px] text-ink-3">
+                  Nothing saved yet. Use Save on a search result or dossier.
+                </p>
               ) : (
-                recentSearches.slice(0, 5).map((rs) => (
-                  <div
-                    key={rs.id}
-                    onClick={() => {
-                      onRunSearch(rs.query, rs.filters?.previous_employer);
-                      onNavigate('discover');
-                    }}
-                    className="p-2 rounded-lg hover:bg-white/[0.04] cursor-pointer flex items-center justify-between text-xs text-slate-300 transition-colors"
-                  >
-                    <span className="line-clamp-1">{rs.query || 'Founders search'}</span>
-                    <span className="text-slate-500 font-mono text-[10px] shrink-0">
-                      {rs.result_count} results
-                    </span>
-                  </div>
-                ))
+                <ul className="panel divide-y divide-line">
+                  {saved.slice(0, 6).map((f) => (
+                    <li key={f.id}>
+                      <a href={paths.profile(f.profile_id)} className="block px-5 py-3.5 hover:bg-surface-2/60">
+                        <div className="flex items-baseline justify-between gap-3">
+                          <span className="font-medium text-ink">{f.name}</span>
+                          <span className="shrink-0 text-[12px] text-ink-3">{relativeTime(f.created_at)}</span>
+                        </div>
+                        <p className="text-[14px] text-ink-2">
+                          {f.current_title || 'No title saved'}
+                          {f.current_company && <> at {f.current_company}</>}
+                          {isKnownLocation(f.location) && <span className="text-ink-3">, {f.location}</span>}
+                        </p>
+                        {f.notes && <p className="mt-1 line-clamp-1 text-[13px] text-ink-3">{f.notes}</p>}
+                      </a>
+                    </li>
+                  ))}
+                </ul>
               )}
+            </section>
+
+            <div className="space-y-7">
+              <section aria-labelledby="recent-searches">
+                <h2 id="recent-searches" className="mb-3 text-[18px] font-semibold text-ink">
+                  Recent searches
+                </h2>
+                {recentUnique.length === 0 ? (
+                  <p className="text-[14px] text-ink-3">No searches yet.</p>
+                ) : (
+                  <ul className="panel divide-y divide-line">
+                    {recentUnique.slice(0, 5).map((r) => (
+                      <li key={r.id}>
+                        <button
+                          onClick={() => {
+                            queueDiscoverSearch(paramsFromRecent(r));
+                            navigate(paths.discover());
+                          }}
+                          className="flex w-full items-center justify-between gap-3 px-4 py-2.5 text-left text-[14px] hover:bg-surface-2/60"
+                        >
+                          <span className="truncate text-ink">{r.query}</span>
+                          <span className="tabular shrink-0 text-[12px] text-ink-3">{r.result_count} results</span>
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </section>
+
+              <section aria-labelledby="lists">
+                <h2 id="lists" className="mb-3 text-[18px] font-semibold text-ink">
+                  Watchlists
+                </h2>
+                <ul className="panel divide-y divide-line">
+                  {watchlists.map((w) => (
+                    <li key={w.id}>
+                      <a href={paths.watchlists()} className="flex items-center justify-between gap-3 px-4 py-2.5 text-[14px] hover:bg-surface-2/60">
+                        <span className="truncate text-ink">{w.name}</span>
+                        <span className="tabular text-[12px] text-ink-3">{w.member_count}</span>
+                      </a>
+                    </li>
+                  ))}
+                </ul>
+              </section>
             </div>
           </div>
-        </div>
-      </div>
+        </>
+      )}
     </div>
   );
 };

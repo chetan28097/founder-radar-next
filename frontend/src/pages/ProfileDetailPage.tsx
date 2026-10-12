@@ -1,436 +1,472 @@
-import React, { useState, useEffect } from 'react';
-import {
-  ArrowLeft, MapPin, Building2, Calendar, Bookmark, BookmarkCheck,
-  Sparkles, ShieldCheck, HelpCircle, Mail, Copy, Check, Save,
-  AlertTriangle, ExternalLink, Loader2, RefreshCw, CheckCircle2
-} from 'lucide-react';
-import { ProfileDossier, FounderProfile } from '../types';
-import { api } from '../services/api';
+import React, { useEffect, useState } from 'react';
+import { ArrowLeft, Bookmark, BookmarkCheck, Check, Loader2, MapPin, Sparkles } from 'lucide-react';
+import { CareerPosition, ProfileDossier, ResearchResponse } from '../types';
+import { api, ApiError } from '../services/api';
 import { StatusBadge } from '../components/StatusBadge';
 import { SaveModal } from '../components/SaveModal';
+import { SkeletonBlock } from '../components/SkeletonLoader';
+import { EmptyState } from '../components/EmptyState';
+import { Avatar, Notice, OutLink, SourceTag, Unavailable } from '../components/ui';
+import { navigate, paths } from '../lib/router';
+import { durationLabel, errorMessage, hostname, isKnownLocation, monthYear, monthsBetween, relativeTime } from '../lib/format';
 
 interface ProfileDetailPageProps {
   profileId: string;
-  onBack: () => void;
-  onDraftOutreach?: (profile: FounderProfile) => void;
 }
 
-export const ProfileDetailPage: React.FC<ProfileDetailPageProps> = ({
-  profileId,
-  onBack,
-  onDraftOutreach,
-}) => {
+export const ProfileDetailPage: React.FC<ProfileDetailPageProps> = ({ profileId }) => {
   const [dossier, setDossier] = useState<ProfileDossier | null>(null);
-  const [loading, setLoading] = useState<boolean>(true);
-  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<{ message: string; notFound: boolean } | null>(null);
+  const [isSaved, setIsSaved] = useState(false);
+  const [saveOpen, setSaveOpen] = useState(false);
 
-  // Editable notes state
-  const [notes, setNotes] = useState<string>('');
-  const [savingNotes, setSavingNotes] = useState<boolean>(false);
-  const [notesSavedSuccess, setNotesSavedSuccess] = useState<boolean>(false);
+  const [notes, setNotes] = useState('');
+  const [notesState, setNotesState] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
 
-  // Outreach generation state
-  const [outreachTone, setOutreachTone] = useState<string>('professional');
-  const [outreachSubject, setOutreachSubject] = useState<string>('');
-  const [outreachBody, setOutreachBody] = useState<string>('');
-  const [generatingOutreach, setGeneratingOutreach] = useState<boolean>(false);
-  const [copiedOutreach, setCopiedOutreach] = useState<boolean>(false);
-
-  // Save Modal
-  const [isSaveModalOpen, setIsSaveModalOpen] = useState<boolean>(false);
-  const [isSaved, setIsSaved] = useState<boolean>(false);
+  const [research, setResearch] = useState<ResearchResponse | null>(null);
+  const [question, setQuestion] = useState('');
+  const [researching, setResearching] = useState(false);
+  const [researchError, setResearchError] = useState<string | null>(null);
 
   useEffect(() => {
-    setLoading(true);
-    setError(null);
-    api.getProfileDossier(profileId)
+    let cancelled = false;
+    api
+      .getProfileDossier(profileId)
       .then((data) => {
+        if (cancelled) return;
         setDossier(data);
+        setIsSaved(data.is_saved);
         setNotes(data.notes || '');
-        setOutreachBody(data.outreach_draft || '');
-        setOutreachSubject(
-          `Connecting with ${data.profile.current_company || 'your venture'} / ex-${data.profile.past_jobs[0]?.company || 'industry'}`
-        );
+        setResearch(data.latest_research || null);
       })
       .catch((err) => {
-        setError(err.message || 'Failed to retrieve profile dossier');
+        if (cancelled) return;
+        setError({
+          message: errorMessage(err, 'The dossier could not be loaded.'),
+          notFound: err instanceof ApiError && err.status === 404,
+        });
       })
-      .finally(() => setLoading(false));
-
-    api.getSavedFounders().then((saved) => {
-      setIsSaved(saved.some((s) => s.profile_id === profileId));
-    }).catch(console.error);
+      .finally(() => !cancelled && setLoading(false));
+    return () => {
+      cancelled = true;
+    };
   }, [profileId]);
 
-  const handleSaveNotes = async () => {
-    setSavingNotes(true);
+  const saveNotes = async () => {
+    if (!dossier) return;
+    setNotesState('saving');
     try {
-      // First ensure founder is saved if not already
-      if (!isSaved && dossier) {
+      if (!isSaved) {
+        const p = dossier.profile;
         await api.saveFounder({
-          profile_id: dossier.profile.id,
-          name: dossier.profile.name,
-          headline: dossier.profile.headline,
-          current_company: dossier.profile.current_company,
-          current_title: dossier.profile.current_title,
-          location: dossier.profile.location,
-          notes: notes,
-          tags: dossier.profile.tags,
+          profile_id: p.id,
+          name: p.name,
+          headline: p.headline,
+          current_company: p.current_company,
+          current_title: p.current_title,
+          location: p.location,
+          notes,
+          tags: p.tags,
         });
         setIsSaved(true);
       } else {
         await api.updateNotes(profileId, notes);
       }
-      setNotesSavedSuccess(true);
-      setTimeout(() => setNotesSavedSuccess(false), 2000);
-    } catch (err) {
-      console.error(err);
-    } finally {
-      setSavingNotes(false);
+      setNotesState('saved');
+      setTimeout(() => setNotesState('idle'), 2000);
+    } catch {
+      setNotesState('error');
     }
   };
 
-  const handleRegenerateOutreach = async () => {
-    if (!dossier) return;
-    setGeneratingOutreach(true);
+  const runResearch = async () => {
+    setResearching(true);
+    setResearchError(null);
     try {
-      const res = await api.generateOutreach({
-        profile_id: profileId,
-        tone: outreachTone,
-      });
-      setOutreachSubject(res.subject);
-      setOutreachBody(res.body);
+      setResearch(await api.analyzeResearch({ profile_id: profileId, custom_question: question.trim() || undefined }));
     } catch (err) {
-      console.error(err);
+      setResearchError(errorMessage(err, 'Research could not be generated.'));
     } finally {
-      setGeneratingOutreach(false);
+      setResearching(false);
     }
   };
 
-  const handleCopyOutreach = () => {
-    const fullText = `Subject: ${outreachSubject}\n\n${outreachBody}`;
-    navigator.clipboard.writeText(fullText);
-    setCopiedOutreach(true);
-    setTimeout(() => setCopiedOutreach(false), 2000);
-  };
+  const back = (
+    <a href={paths.discover()} className="inline-flex items-center gap-1.5 text-[14px] text-ink-2 hover:text-ink">
+      <ArrowLeft className="h-4 w-4" strokeWidth={1.75} aria-hidden />
+      Back to results
+    </a>
+  );
 
   if (loading) {
     return (
-      <div className="max-w-5xl mx-auto px-4 py-16 text-center space-y-4">
-        <Loader2 className="w-8 h-8 text-indigo-500 animate-spin mx-auto" />
-        <p className="text-sm text-slate-400">Assembling founder intelligence dossier from Crustdata & Claude...</p>
+      <div className="mx-auto max-w-6xl space-y-6 px-4 py-8 sm:px-6">
+        {back}
+        <div className="flex items-center gap-4">
+          <div className="skeleton h-16 w-16 rounded-[14px]" />
+          <div className="flex-1 space-y-2.5">
+            <div className="skeleton h-6 w-64" />
+            <div className="skeleton h-4 w-80 max-w-full" />
+          </div>
+        </div>
+        <div className="panel p-5">
+          <SkeletonBlock lines={5} />
+        </div>
       </div>
     );
   }
 
   if (error || !dossier) {
     return (
-      <div className="max-w-3xl mx-auto px-4 py-12 text-center space-y-4">
-        <div className="p-4 rounded-xl bg-rose-950/40 border border-rose-500/30 text-rose-300 text-sm">
-          {error || 'Profile could not be loaded.'}
-        </div>
-        <button
-          onClick={onBack}
-          className="px-4 py-2 rounded-xl text-xs font-medium bg-white/5 hover:bg-white/10 text-slate-200"
-        >
-          ← Return to Search
-        </button>
+      <div className="mx-auto max-w-6xl space-y-6 px-4 py-8 sm:px-6">
+        {back}
+        <EmptyState
+          type="error"
+          title={error?.notFound ? 'This profile is not loaded' : 'Dossier unavailable'}
+          description={
+            error?.notFound
+              ? 'Founder Radar only keeps profiles that appeared in a search or were saved. Run a search that includes this person to load their record.'
+              : error?.message || 'The dossier could not be loaded.'
+          }
+          actionText="Go to Discover"
+          onAction={() => navigate(paths.discover())}
+        />
       </div>
     );
   }
 
   const { profile } = dossier;
+  const company = profile.company;
 
   return (
-    <div className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-8">
-      {/* Top Breadcrumb & Actions */}
-      <div className="flex items-center justify-between">
-        <button
-          onClick={onBack}
-          className="inline-flex items-center gap-2 text-xs font-medium text-slate-400 hover:text-white transition-colors"
-        >
-          <ArrowLeft className="w-4 h-4" />
-          <span>Back to Discover</span>
-        </button>
+    <div className="mx-auto max-w-6xl space-y-7 px-4 py-8 sm:px-6">
+      {back}
 
-        <button
-          onClick={() => setIsSaveModalOpen(true)}
-          className={`px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors flex items-center gap-1.5 ${
-            isSaved
-              ? 'bg-indigo-950/40 border-indigo-500/40 text-indigo-300'
-              : 'bg-white/[0.03] border-white/10 text-slate-300 hover:bg-white/[0.08]'
-          }`}
-        >
-          {isSaved ? <BookmarkCheck className="w-3.5 h-3.5 text-indigo-400" /> : <Bookmark className="w-3.5 h-3.5" />}
-          <span>{isSaved ? 'Saved in Watchlist' : 'Save to Watchlist'}</span>
-        </button>
-      </div>
-
-      {/* Profile Header Dossier Banner */}
-      <div className="glass-panel rounded-2xl p-6 sm:p-8 border border-white/10 shadow-2xl space-y-6">
-        <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-6">
-          <div className="flex items-start gap-5">
-            {profile.avatar_url ? (
-              <img
-                src={profile.avatar_url}
-                alt={profile.name}
-                className="w-20 h-20 rounded-2xl object-cover border border-white/10 shrink-0"
-              />
-            ) : (
-              <div className="w-20 h-20 rounded-2xl bg-gradient-to-br from-indigo-500/20 to-purple-500/20 border border-white/10 flex items-center justify-center text-xl font-bold text-indigo-300 shrink-0">
-                {profile.name.slice(0, 2).toUpperCase()}
-              </div>
-            )}
-
-            <div className="space-y-1.5">
-              <div className="flex flex-wrap items-center gap-2.5">
-                <h1 className="text-2xl font-bold text-white tracking-tight">{profile.name}</h1>
-                <StatusBadge status={profile.transition_status} />
-              </div>
-              <p className="text-sm font-medium text-indigo-300">
-                {profile.current_title || 'Founder'}
-                {profile.current_company && ` at ${profile.current_company}`}
-              </p>
-              {profile.headline && (
-                <p className="text-xs text-slate-400 max-w-xl leading-relaxed">{profile.headline}</p>
+      {/* Header */}
+      <header className="flex flex-col gap-5 border-b border-line pb-6 md:flex-row md:items-start md:justify-between">
+        <div className="flex min-w-0 items-start gap-4">
+          <Avatar name={profile.name} src={profile.avatar_url} size={68} />
+          <div className="min-w-0">
+            <h1 className="text-[28px] font-semibold leading-tight text-ink">{profile.name}</h1>
+            <p className="mt-1 text-[16px] text-ink-2">
+              {profile.current_title || <Unavailable>No current title</Unavailable>}
+              {profile.current_company && (
+                <>
+                  <span className="text-ink-3"> at </span>
+                  <span className="font-medium text-ink">{profile.current_company}</span>
+                </>
               )}
-              <div className="flex items-center gap-3 pt-1 text-xs text-slate-500 font-mono">
-                {profile.location && (
-                  <span className="flex items-center gap-1">
-                    <MapPin className="w-3.5 h-3.5" />
-                    <span>{profile.location}</span>
-                  </span>
-                )}
-                <span>·</span>
-                <span>Crustdata ID: {profile.crustdata_id || profile.id}</span>
-              </div>
+            </p>
+            {profile.headline && <p className="mt-1.5 max-w-2xl text-[14px] text-ink-3">{profile.headline}</p>}
+            <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-[13px] text-ink-3">
+              {isKnownLocation(profile.location) ? (
+                <span className="inline-flex items-center gap-1">
+                  <MapPin className="h-3.5 w-3.5" strokeWidth={1.75} aria-hidden />
+                  {profile.location}
+                </span>
+              ) : (
+                <Unavailable>Location not recorded</Unavailable>
+              )}
+              {profile.data_updated_at && <span>Record updated {monthYear(profile.data_updated_at)}</span>}
             </div>
           </div>
         </div>
-
-        {/* Transition Summary Alert */}
-        <div className="p-4 rounded-xl bg-white/[0.02] border border-white/5 space-y-1">
-          <span className="text-[11px] font-mono text-indigo-400 uppercase tracking-wider block">
-            Transition Signal Evaluation
-          </span>
-          <p className="text-xs text-slate-300 leading-relaxed font-normal">
-            {profile.transition_summary}
-          </p>
+        <div className="flex shrink-0 flex-wrap gap-2 md:justify-end">
+          {profile.linkedin_url ? (
+            <OutLink href={profile.linkedin_url} variant="button">
+              Open LinkedIn
+            </OutLink>
+          ) : (
+            <span className="btn btn-secondary cursor-default text-ink-3" title="No LinkedIn URL in the Crustdata record">
+              No LinkedIn URL
+            </span>
+          )}
+          <button onClick={() => setSaveOpen(true)} className={isSaved ? 'btn btn-secondary text-accent' : 'btn btn-primary'}>
+            {isSaved ? (
+              <BookmarkCheck className="h-4 w-4" strokeWidth={1.75} aria-hidden />
+            ) : (
+              <Bookmark className="h-4 w-4" strokeWidth={1.75} aria-hidden />
+            )}
+            {isSaved ? 'Saved' : 'Save founder'}
+          </button>
         </div>
-      </div>
+      </header>
 
-      {/* Main Dossier Content (2 Column Layout) */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Left Column: Career Timeline (1 Col) */}
-        <div className="space-y-4">
-          <h2 className="text-base font-semibold text-white flex items-center gap-2">
-            <Calendar className="w-4 h-4 text-indigo-400" />
-            <span>Career Trajectory</span>
-          </h2>
+      {/* Transition summary (rule-based, from the record) */}
+      {profile.founder_status ? (
+        <section className="flex flex-col items-start gap-2 rounded-lg bg-surface-2/70 px-4 py-3 sm:flex-row sm:items-center sm:gap-4">
+          <StatusBadge status={dossier.transition_status} />
+          <p className="text-[14px] text-ink-2">{profile.transition_summary}</p>
+        </section>
+      ) : (
+        <p className="rounded-lg bg-surface-2/70 px-4 py-3 text-[14px] text-ink-2">
+          No current title in the record says founder, so no founder-transition label applies to this profile.
+        </p>
+      )}
 
-          <div className="glass-card rounded-2xl p-5 border border-white/5 space-y-6">
-            {dossier.career_timeline.map((pos, idx) => (
-              <div key={idx} className="relative pl-6 pb-2 last:pb-0 border-l border-white/10 last:border-0">
-                <div
-                  className={`absolute -left-[5px] top-1 w-2.5 h-2.5 rounded-full ${
-                    pos.is_current ? 'bg-emerald-400 ring-4 ring-emerald-500/20' : 'bg-slate-600'
-                  }`}
-                />
-                <div>
-                  <h4 className="text-xs font-semibold text-white">{pos.title}</h4>
-                  <div className="text-xs font-medium text-indigo-300 flex items-center gap-1 mt-0.5">
-                    <Building2 className="w-3 h-3 text-slate-500" />
-                    <span>{pos.company}</span>
-                  </div>
-                  <div className="text-[11px] text-slate-500 font-mono mt-1">
-                    {pos.start_date ? pos.start_date.slice(0, 7) : 'Date Unknown'} –{' '}
-                    {pos.is_current ? 'Present' : (pos.end_date ? pos.end_date.slice(0, 7) : 'Unknown')}
-                  </div>
-                  {pos.description && (
-                    <p className="text-[11px] text-slate-400 mt-2 line-clamp-3 leading-relaxed">
-                      {pos.description}
-                    </p>
-                  )}
-                </div>
-              </div>
-            ))}
-          </div>
-
-          {/* Diligence & Verification Steps */}
-          <div className="glass-card rounded-2xl p-5 border border-white/5 space-y-3">
-            <h3 className="text-xs font-semibold text-white flex items-center gap-1.5 uppercase tracking-wider font-mono text-slate-400">
-              <ShieldCheck className="w-4 h-4 text-cyan-400" />
-              <span>Recommended Verification</span>
-            </h3>
-            <ul className="space-y-2 text-xs text-slate-300">
-              {dossier.recommended_verification.map((step, idx) => (
-                <li key={idx} className="flex items-start gap-2">
-                  <span className="text-indigo-400 font-mono">0{idx + 1}.</span>
-                  <span>{step}</span>
-                </li>
-              ))}
-            </ul>
-          </div>
-        </div>
-
-        {/* Right Column: AI Research Dossier & Outreach Generator (2 Cols) */}
-        <div className="lg:col-span-2 space-y-6">
-          {/* AI Grounded Synthesis */}
-          <div className="glass-card rounded-2xl p-6 border border-white/5 space-y-4">
-            <div className="flex items-center justify-between pb-3 border-b border-white/5">
-              <h2 className="text-base font-semibold text-white flex items-center gap-2">
-                <Sparkles className="w-4 h-4 text-purple-400" />
-                <span>AI Research Synthesis</span>
+      <div className="grid grid-cols-1 gap-7 lg:grid-cols-[minmax(0,1fr)_340px]">
+        <div className="min-w-0 space-y-7">
+          {/* Career timeline */}
+          <section aria-labelledby="career-heading">
+            <div className="mb-3 flex items-center justify-between">
+              <h2 id="career-heading" className="text-[18px] font-semibold text-ink">
+                Career history
               </h2>
-              <span className="text-[10px] font-mono text-slate-500">Claude Sonnet 4.6 Grounded</span>
+              <SourceTag kind="sourced" />
+            </div>
+            {dossier.career_timeline.length === 0 ? (
+              <p className="panel px-5 py-4 text-[14px] text-ink-3">No employment history in the record.</p>
+            ) : (
+              <ol className="panel divide-y divide-line">
+                {dossier.career_timeline.map((pos, idx) => (
+                  <TimelineRow key={`${pos.company}-${pos.start_date}-${idx}`} pos={pos} />
+                ))}
+              </ol>
+            )}
+          </section>
+
+          {profile.education.length > 0 && (
+            <section aria-labelledby="edu-heading">
+              <h2 id="edu-heading" className="mb-3 text-[18px] font-semibold text-ink">
+                Education
+              </h2>
+              <ul className="panel divide-y divide-line">
+                {profile.education.map((e, i) => (
+                  <li key={i} className="flex flex-col gap-0.5 px-5 py-3 sm:flex-row sm:items-baseline sm:justify-between">
+                    <span>
+                      <span className="font-medium text-ink">{e.school}</span>
+                      {e.degree && <span className="text-ink-2">, {e.degree}</span>}
+                    </span>
+                    <span className="tabular text-[13px] text-ink-3">
+                      {e.start_year || e.end_year ? `${e.start_year ?? '?'} to ${e.end_year ?? '?'}` : 'Years not recorded'}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </section>
+          )}
+
+          {/* AI research: only on request */}
+          <section aria-labelledby="research-heading" className="panel overflow-hidden">
+            <div className="flex flex-col gap-2 border-b border-line px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <h2 id="research-heading" className="text-[18px] font-semibold text-ink">
+                  Research notes from Claude
+                </h2>
+                <p className="mt-0.5 text-[13px] text-ink-3">
+                  Generated only when you ask, from the record above. It can be wrong; check it against the sources.
+                </p>
+              </div>
+              <SourceTag kind="ai" />
             </div>
 
-            <div className="prose prose-invert max-w-none text-xs text-slate-300 leading-relaxed space-y-3">
-              <p>{dossier.ai_research_summary}</p>
-            </div>
-
-            {/* Factual Evidence vs Uncertainties Box */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2 text-xs">
-              <div className="p-3.5 rounded-xl bg-emerald-950/20 border border-emerald-500/20 space-y-2">
-                <span className="text-[11px] font-semibold text-emerald-400 flex items-center gap-1">
-                  <CheckCircle2 className="w-3.5 h-3.5" />
-                  <span>Verified Factual Grounds</span>
-                </span>
-                <ul className="space-y-1 text-slate-300 list-disc list-inside text-[11px]">
-                  {dossier.transition_evidence.map((ev, i) => (
-                    <li key={i}>{ev}</li>
-                  ))}
-                </ul>
+            <div className="space-y-4 px-5 py-4">
+              <div className="flex flex-col gap-2 sm:flex-row">
+                <input
+                  value={question}
+                  onChange={(e) => setQuestion(e.target.value)}
+                  placeholder="Optional focus, e.g. how relevant is their payments experience?"
+                  className="field"
+                  aria-label="Optional research focus"
+                />
+                <button onClick={runResearch} disabled={researching} className="btn btn-secondary shrink-0">
+                  {researching ? (
+                    <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
+                  ) : (
+                    <Sparkles className="h-4 w-4" strokeWidth={1.75} aria-hidden />
+                  )}
+                  {research ? 'Run again' : 'Run research'}
+                </button>
               </div>
 
-              <div className="p-3.5 rounded-xl bg-amber-950/20 border border-amber-500/20 space-y-2">
-                <span className="text-[11px] font-semibold text-amber-400 flex items-center gap-1">
-                  <AlertTriangle className="w-3.5 h-3.5" />
-                  <span>Identified Information Gaps</span>
-                </span>
-                <ul className="space-y-1 text-slate-300 list-disc list-inside text-[11px]">
-                  {dossier.information_gaps.map((gap, i) => (
-                    <li key={i}>{gap}</li>
-                  ))}
-                </ul>
-              </div>
-            </div>
-          </div>
+              {researchError && <Notice>{researchError}</Notice>}
 
-          {/* Editable Research Notes */}
-          <div className="glass-card rounded-2xl p-6 border border-white/5 space-y-3">
-            <div className="flex items-center justify-between">
-              <h3 className="text-sm font-semibold text-white">Private Research Notes</h3>
-              <button
-                onClick={handleSaveNotes}
-                disabled={savingNotes}
-                className="px-3 py-1.5 rounded-lg text-xs font-medium bg-white/[0.04] hover:bg-white/10 border border-white/10 text-slate-200 transition-colors flex items-center gap-1.5"
-              >
-                {savingNotes ? (
-                  <Loader2 className="w-3 h-3 animate-spin" />
-                ) : notesSavedSuccess ? (
-                  <Check className="w-3 h-3 text-emerald-400" />
-                ) : (
-                  <Save className="w-3 h-3" />
-                )}
-                <span>{notesSavedSuccess ? 'Saved' : 'Save Notes'}</span>
+              {researching && !research && <SkeletonBlock lines={4} />}
+
+              {research ? (
+                <ResearchBody research={research} />
+              ) : (
+                !researching &&
+                !researchError && <p className="text-[14px] text-ink-3">No research has been run for this founder yet.</p>
+              )}
+            </div>
+          </section>
+        </div>
+
+        {/* Aside: company, gaps, notes */}
+        <aside className="space-y-6">
+          <section aria-labelledby="company-heading" className="panel">
+            <div className="flex items-center justify-between border-b border-line px-4 py-3">
+              <h2 id="company-heading" className="text-[15px] font-semibold text-ink">
+                Current company
+              </h2>
+              <SourceTag kind="sourced" detail="Crustdata" />
+            </div>
+            {company ? (
+              <div className="space-y-3 px-4 py-4">
+                <div className="flex items-center gap-3">
+                  <Avatar name={company.name} src={company.logo_url} size={40} />
+                  <div className="min-w-0">
+                    <p className="truncate font-semibold text-ink">{company.name}</p>
+                    <p className="text-[13px] text-ink-3">
+                      {company.title || 'Role not recorded'}
+                      {company.start_date && <> since {monthYear(company.start_date)}</>}
+                    </p>
+                  </div>
+                </div>
+                <dl className="grid grid-cols-[96px_1fr] gap-x-3 gap-y-2 text-[14px]">
+                  <dt className="text-ink-3">Website</dt>
+                  <dd className="min-w-0 truncate">
+                    {company.website ? (
+                      <OutLink href={company.website}>{hostname(company.website) || company.website}</OutLink>
+                    ) : (
+                      <Unavailable />
+                    )}
+                  </dd>
+                  <dt className="text-ink-3">LinkedIn</dt>
+                  <dd>
+                    {company.linkedin_url ? <OutLink href={company.linkedin_url}>Company page</OutLink> : <Unavailable />}
+                  </dd>
+                  <dt className="text-ink-3">Industry</dt>
+                  <dd className="text-ink-2">{company.industries.length ? company.industries.join(', ') : <Unavailable />}</dd>
+                  <dt className="text-ink-3">Headcount</dt>
+                  <dd className="tabular text-ink-2">
+                    {typeof company.headcount === 'number'
+                      ? company.headcount.toLocaleString()
+                      : company.headcount_range || <Unavailable />}
+                  </dd>
+                  <dt className="text-ink-3">HQ</dt>
+                  <dd className="text-ink-2">{company.hq || <Unavailable />}</dd>
+                </dl>
+              </div>
+            ) : (
+              <p className="px-4 py-4 text-[14px] text-ink-3">No current company in the record.</p>
+            )}
+          </section>
+
+          <section aria-labelledby="gaps-heading" className="panel px-4 py-4">
+            <h2 id="gaps-heading" className="text-[15px] font-semibold text-ink">
+              What the record does not show
+            </h2>
+            <p className="mb-2 mt-0.5 text-[13px] text-ink-3">Checked automatically against the Crustdata fields.</p>
+            {dossier.data_gaps.length === 0 ? (
+              <p className="text-[14px] text-ink-2">No obvious gaps in the core fields.</p>
+            ) : (
+              <ul className="space-y-1.5 text-[14px] text-ink-2">
+                {dossier.data_gaps.map((g) => (
+                  <li key={g} className="flex gap-2">
+                    <span className="mt-[9px] h-1 w-1 shrink-0 rounded-full bg-ink-3" aria-hidden />
+                    {g}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </section>
+
+          <section aria-labelledby="notes-heading" className="panel px-4 py-4">
+            <div className="mb-2 flex items-center justify-between">
+              <h2 id="notes-heading" className="text-[15px] font-semibold text-ink">
+                Your notes
+              </h2>
+              <button onClick={saveNotes} disabled={notesState === 'saving'} className="btn btn-quiet min-h-8 px-2 text-[13px]">
+                {notesState === 'saving' && <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />}
+                {notesState === 'saved' && <Check className="h-3.5 w-3.5 text-ok" aria-hidden />}
+                {notesState === 'saved' ? 'Saved' : 'Save notes'}
               </button>
             </div>
             <textarea
-              rows={3}
-              placeholder="Record diligence impressions, interview notes, or co-founder references..."
+              rows={5}
               value={notes}
               onChange={(e) => setNotes(e.target.value)}
-              className="w-full px-3 py-2 text-xs rounded-xl bg-white/[0.03] border border-white/10 text-slate-200 placeholder-slate-500 focus:outline-none focus:border-indigo-500 resize-none"
+              placeholder={isSaved ? 'Add diligence notes' : 'Saving a note also saves this founder'}
+              className="field resize-y"
+              aria-labelledby="notes-heading"
             />
-          </div>
-
-          {/* Interactive Outreach Draft Generator */}
-          <div className="glass-card rounded-2xl p-6 border border-white/5 space-y-4">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-white/5">
-              <div>
-                <h3 className="text-sm font-semibold text-white flex items-center gap-2">
-                  <Mail className="w-4 h-4 text-purple-400" />
-                  <span>Personalized Outreach Draft</span>
-                </h3>
-                <p className="text-xs text-slate-400 mt-0.5">
-                  Draft grounded communication for human review. Never auto-sent.
-                </p>
-              </div>
-
-              {/* Tone Selector */}
-              <div className="flex items-center gap-1.5 text-xs">
-                {['professional', 'casual', 'investor'].map((t) => (
-                  <button
-                    key={t}
-                    onClick={() => {
-                      setOutreachTone(t);
-                    }}
-                    className={`px-2.5 py-1 rounded-lg capitalize transition-colors ${
-                      outreachTone === t
-                        ? 'bg-indigo-600 text-white font-medium'
-                        : 'bg-white/[0.03] text-slate-400 hover:text-slate-200'
-                    }`}
-                  >
-                    {t}
-                  </button>
-                ))}
-                <button
-                  onClick={handleRegenerateOutreach}
-                  disabled={generatingOutreach}
-                  className="p-1.5 rounded-lg bg-white/[0.03] hover:bg-white/[0.08] text-slate-300 transition-colors ml-1"
-                  title="Regenerate with selected tone"
-                >
-                  <RefreshCw className={`w-3.5 h-3.5 ${generatingOutreach ? 'animate-spin' : ''}`} />
-                </button>
-              </div>
-            </div>
-
-            <div className="space-y-3">
-              <div>
-                <label className="block text-[11px] font-mono text-slate-400 mb-1">Subject</label>
-                <input
-                  type="text"
-                  value={outreachSubject}
-                  onChange={(e) => setOutreachSubject(e.target.value)}
-                  className="w-full px-3 py-2 text-xs rounded-lg bg-white/[0.03] border border-white/10 text-slate-200 focus:outline-none focus:border-indigo-500"
-                />
-              </div>
-
-              <div>
-                <label className="block text-[11px] font-mono text-slate-400 mb-1">Message Body</label>
-                <textarea
-                  rows={6}
-                  value={outreachBody}
-                  onChange={(e) => setOutreachBody(e.target.value)}
-                  className="w-full px-3 py-2 text-xs rounded-lg bg-white/[0.03] border border-white/10 text-slate-200 focus:outline-none focus:border-indigo-500 resize-none font-sans"
-                />
-              </div>
-            </div>
-
-            <div className="flex items-center justify-between pt-2">
-              <span className="text-[11px] text-slate-500">
-                Note: Review and send manually from your preferred email client.
-              </span>
-              <button
-                onClick={handleCopyOutreach}
-                className="px-4 py-2 rounded-xl text-xs font-medium bg-indigo-600 hover:bg-indigo-500 text-white transition-colors flex items-center gap-1.5 shadow-lg shadow-indigo-600/30"
-              >
-                {copiedOutreach ? <Check className="w-3.5 h-3.5 text-emerald-300" /> : <Copy className="w-3.5 h-3.5" />}
-                <span>{copiedOutreach ? 'Copied to Clipboard' : 'Copy Message'}</span>
-              </button>
-            </div>
-          </div>
-        </div>
+            {notesState === 'error' && <p className="mt-1.5 text-[13px] text-danger">Notes could not be saved.</p>}
+          </section>
+        </aside>
       </div>
 
-      {/* Save Modal */}
-      <SaveModal
-        profile={profile}
-        isOpen={isSaveModalOpen}
-        onClose={() => setIsSaveModalOpen(false)}
-        onSuccess={() => setIsSaved(true)}
-      />
+      <SaveModal profile={profile} isOpen={saveOpen} onClose={() => setSaveOpen(false)} onSuccess={() => setIsSaved(true)} />
     </div>
   );
 };
+
+const TimelineRow: React.FC<{ pos: CareerPosition }> = ({ pos }) => {
+  const start = monthYear(pos.start_date);
+  const end = pos.is_current ? 'Present' : monthYear(pos.end_date);
+  const duration = durationLabel(
+    pos.start_date && (pos.is_current || pos.end_date) ? monthsBetween(pos.start_date, pos.end_date) : null,
+  );
+  return (
+    <li className="grid grid-cols-1 gap-1 px-5 py-3.5 sm:grid-cols-[150px_1fr] sm:gap-4">
+      <div className="tabular text-[13px] text-ink-3">
+        {start || end ? (
+          <>
+            {start || '?'} to {end || '?'}
+            {duration && <span className="block">{duration}</span>}
+          </>
+        ) : (
+          <Unavailable>Dates not recorded</Unavailable>
+        )}
+      </div>
+      <div className="min-w-0">
+        <p className="text-[15px] font-medium text-ink">
+          {pos.title || <Unavailable>Title not recorded</Unavailable>}
+          {pos.is_current && (
+            <span className="ml-2 rounded-[4px] bg-accent-soft px-1.5 py-px align-middle text-[12px] font-medium text-accent">
+              Current
+            </span>
+          )}
+        </p>
+        <p className="text-[14px] text-ink-2">
+          {pos.company_website ? <OutLink href={pos.company_website}>{pos.company}</OutLink> : pos.company}
+          {pos.company_industries.length > 0 && <span className="text-ink-3">, {pos.company_industries[0]}</span>}
+        </p>
+        {pos.description && <p className="mt-1 line-clamp-3 text-[13px] text-ink-3">{pos.description}</p>}
+      </div>
+    </li>
+  );
+};
+
+export const ResearchBody: React.FC<{ research: ResearchResponse }> = ({ research }) => (
+  <div className="space-y-4">
+    <p className="text-[12px] text-ink-3">
+      {research.model || 'Model not recorded'}
+      {research.generated_at && <>, {relativeTime(research.generated_at)}</>}
+      {research.custom_question && <>. Focus: "{research.custom_question}"</>}
+    </p>
+    <p className="max-w-[68ch] text-[15px] leading-relaxed text-ink">{research.research_summary}</p>
+    <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+      <ResearchList title="Facts it relied on" items={research.supporting_evidence} empty="None listed." />
+      <ResearchList title="What it could not establish" items={research.uncertainties} empty="None listed." />
+    </div>
+    {research.suggested_questions.length > 0 && (
+      <ResearchList title="Questions to ask next" items={research.suggested_questions} ordered />
+    )}
+  </div>
+);
+
+const ResearchList: React.FC<{ title: string; items: string[]; empty?: string; ordered?: boolean }> = ({
+  title,
+  items,
+  empty,
+  ordered,
+}) => (
+  <div>
+    <h3 className="eyebrow mb-1.5">{title}</h3>
+    {items.length === 0 ? (
+      <p className="text-[14px] text-ink-3">{empty}</p>
+    ) : (
+      <ul className="space-y-1.5 text-[14px] text-ink-2">
+        {items.map((item, i) => (
+          <li key={i} className="flex gap-2">
+            <span className="tabular w-4 shrink-0 text-ink-3">{ordered ? `${i + 1}.` : '–'}</span>
+            <span>{item}</span>
+          </li>
+        ))}
+      </ul>
+    )}
+  </div>
+);

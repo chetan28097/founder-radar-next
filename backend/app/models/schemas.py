@@ -10,6 +10,38 @@ class CareerPosition(BaseModel):
     is_current: bool = False
     description: Optional[str] = None
     duration_months: Optional[int] = None
+    # Company facts exactly as returned by Crustdata for this position
+    company_website: Optional[str] = None
+    company_linkedin_url: Optional[str] = None
+    company_logo_url: Optional[str] = None
+    company_industries: List[str] = []
+    company_headcount: Optional[int] = None
+    company_headcount_range: Optional[str] = None
+    company_hq: Optional[str] = None
+    company_type: Optional[str] = None
+    location: Optional[str] = None
+
+
+class EducationEntry(BaseModel):
+    school: str
+    degree: Optional[str] = None
+    start_year: Optional[int] = None
+    end_year: Optional[int] = None
+
+
+class CompanyOverview(BaseModel):
+    """Current company facts sourced from the founder's current Crustdata position."""
+    name: str
+    title: Optional[str] = None
+    start_date: Optional[str] = None
+    website: Optional[str] = None
+    linkedin_url: Optional[str] = None
+    logo_url: Optional[str] = None
+    industries: List[str] = []
+    headcount: Optional[int] = None
+    headcount_range: Optional[str] = None
+    hq: Optional[str] = None
+    company_type: Optional[str] = None
 
 
 class FounderProfile(BaseModel):
@@ -22,6 +54,9 @@ class FounderProfile(BaseModel):
     location: Optional[str] = None
     country: Optional[str] = None
     avatar_url: Optional[str] = None
+    linkedin_url: Optional[str] = None
+    company: Optional[CompanyOverview] = None
+    education: List[EducationEntry] = []
     current_jobs: List[CareerPosition] = []
     past_jobs: List[CareerPosition] = []
     founder_status: bool = False
@@ -31,6 +66,7 @@ class FounderProfile(BaseModel):
     match_reasons: List[str] = []
     tags: List[str] = []
     data_completeness: float = 0.5
+    data_updated_at: Optional[str] = None
 
 
 class SearchRequest(BaseModel):
@@ -53,20 +89,6 @@ class SearchResponse(BaseModel):
     remarks: Optional[Any] = None
 
 
-class ProfileDossier(BaseModel):
-    profile: FounderProfile
-    career_timeline: List[CareerPosition]
-    transition_status: str
-    transition_evidence: List[str]
-    ai_research_summary: str
-    relevance_explanation: str
-    information_gaps: List[str]
-    recommended_verification: List[str]
-    outreach_draft: str
-    notes: Optional[str] = None
-    watchlists: List[str] = []
-
-
 class ResearchRequest(BaseModel):
     profile_id: str
     custom_question: Optional[str] = None
@@ -81,6 +103,22 @@ class ResearchResponse(BaseModel):
     uncertainties: List[str] = []
     suggested_questions: List[str] = []
     outreach_draft: str = ""
+    model: Optional[str] = None
+    custom_question: Optional[str] = None
+    generated_at: Optional[str] = None
+
+
+class ProfileDossier(BaseModel):
+    profile: FounderProfile
+    career_timeline: List[CareerPosition]
+    transition_status: str
+    transition_evidence: List[str]
+    # Deterministic gaps computed from the sourced record (not AI output)
+    data_gaps: List[str] = []
+    latest_research: Optional[ResearchResponse] = None
+    notes: Optional[str] = None
+    watchlists: List[str] = []
+    is_saved: bool = False
 
 
 class OutreachDraftRequest(BaseModel):
@@ -137,6 +175,7 @@ class SavedFounder(BaseModel):
     notes: Optional[str] = None
     tags: List[str] = []
     raw_profile: Optional[Dict[str, Any]] = None
+    researched_at: Optional[str] = None
     created_at: str
     updated_at: str
 
@@ -147,9 +186,11 @@ class NoteUpdateRequest(BaseModel):
 
 class HealthResponse(BaseModel):
     status: str
+    # These flags mean "credentials are configured", not "a live call succeeded".
     crustdata_connected: bool
     litellm_connected: bool
     neatlogs_connected: bool
+    neatlogs_tracer_active: bool = False
     model_id: str
     database_connected: bool
     timestamp: str

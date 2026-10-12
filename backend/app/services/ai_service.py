@@ -1,6 +1,6 @@
-import os
 import json
 import logging
+from datetime import datetime, timezone
 from typing import Dict, Any, List, Optional
 from litellm import completion
 from app.config import settings
@@ -69,31 +69,38 @@ class AIService:
         Generates an evidence-grounded research synthesis, gap analysis,
         suggested diligence questions, and personalized outreach draft.
         """
-        profile_dict = profile.model_dump()
+        from app.services.crustdata_service import CrustdataService
+
+        profile_dict = profile.model_dump(exclude={"avatar_url", "tags", "data_completeness"})
+        data_gaps = CrustdataService.compute_data_gaps(profile)
 
         system_prompt = (
             "You are the senior research analyst for Founder Radar, a global founder intelligence platform. "
-            "Your output must be grounded strictly in the provided profile data. "
-            "Never invent companies, dates, patents, funding rounds, or personal relationships. "
-            "Explicitly separate verified facts from hypotheses. "
-            "If information is missing, explicitly state what is missing. "
+            "Your output must be grounded strictly in the provided profile data, which comes from Crustdata. "
+            "Never invent companies, dates, patents, funding rounds, products, or personal relationships. "
+            "Never conclude that someone founded a company because they left an employer; founding requires an explicit founder title. "
+            "Explicitly separate recorded facts from interpretation. "
+            "If information is missing, say it is missing instead of guessing. "
             "Return ONLY a valid JSON object matching the requested schema."
         )
 
         prompt = f"""
-Candidate Profile Data:
+Candidate Profile Data (Crustdata record, normalized):
 {json.dumps(profile_dict, indent=2, ensure_ascii=False)}
+
+Gaps already detected in the record:
+{json.dumps(data_gaps, ensure_ascii=False)}
 
 User Inquiry: {custom_question or "Perform standard founder transition and background diligence analysis."}
 Preferred Outreach Tone: {tone}
 
 Instructions:
-1. Provide a concise, fact-grounded 'research_summary' synthesizing their career journey and founder indicators.
-2. Evaluate transition credibility ('verified', 'unverified', or 'insufficient_evidence') using documented evidence.
-3. List 'supporting_evidence' (quotes or facts explicitly grounded in their positions/dates).
-4. List 'uncertainties' and data gaps (e.g. unknown funding status, stealth mode ambiguity, missing dates).
-5. Suggest 3-4 specific 'suggested_questions' for a first exploratory conversation.
-6. Draft an 'outreach_draft' for human review, referencing only true facts from their profile.
+1. Provide a concise 'research_summary' (3-5 sentences) of their career journey and current company, using only the record.
+2. Keep 'transition_status' as given unless the record clearly contradicts it.
+3. List 'supporting_evidence': each item must restate a specific recorded fact (role, company, date, company detail).
+4. List 'uncertainties': what cannot be concluded from the record (funding, traction, product, role scope, missing dates).
+5. Suggest 3-4 specific 'suggested_questions' for diligence that would resolve those uncertainties.
+6. Draft a short 'outreach_draft' for human review, referencing only recorded facts.
 
 Return a JSON object in this exact structure:
 {{
@@ -109,44 +116,30 @@ Return a JSON object in this exact structure:
         with trace_span("ai_synthesis", profile_id=profile.id, model=settings.LITELLM_MODEL):
             try:
                 raw_response = cls._call_model(prompt, system_prompt)
-                parsed = cls._parse_json_response(raw_response)
             except Exception as exc:
                 logger.error(f"AI synthesis failed: {exc}")
-                parsed = {}
+                raise RuntimeError(f"The model call failed: {exc}") from exc
+            parsed = cls._parse_json_response(raw_response)
 
-        # Fallback to grounded defaults if LLM call is interrupted or returns invalid JSON
-        summary = parsed.get("research_summary") or (
-            f"{profile.name} is currently {profile.current_title} at {profile.current_company or 'their venture'} in {profile.location}. "
-            f"Career history records {len(profile.past_jobs)} prior positions, including {profile.past_jobs[0].company if profile.past_jobs else 'past industry roles'}."
-        )
+        # No silent fallback: generic text must never be presented as model output.
+        summary = parsed.get("research_summary")
+        if not summary:
+            raise RuntimeError("The model returned no usable research summary.")
 
-        transition_status = parsed.get("transition_status") or profile.transition_status
-        evidence = parsed.get("supporting_evidence") or profile.match_reasons
-        uncertainties = parsed.get("uncertainties") or [
-            "Current company incorporation status not verified in public register.",
-            "Stealth domain or product url not directly cited in profile headline."
-        ]
-        questions = parsed.get("suggested_questions") or [
-            f"What prompted the transition from {profile.past_jobs[0].company if profile.past_jobs else 'your previous role'} to founding your current venture?",
-            "What core technical or market problem is your current team focused on?",
-            "What milestones are prioritized over the upcoming quarter?"
-        ]
-        outreach = parsed.get("outreach_draft") or (
-            f"Hi {profile.name.split()[0] if profile.name else 'there'},\n\n"
-            f"I came across your profile and noticed your journey from {profile.past_jobs[0].company if profile.past_jobs else 'your previous leadership roles'} "
-            f"into building {profile.current_company or 'your new company'}. "
-            f"I would welcome the opportunity to connect and learn more about what you're working on.\n\n"
-            f"Best regards,"
-        )
+        def _str_list(value: Any) -> List[str]:
+            return [str(v) for v in value if v] if isinstance(value, list) else []
 
         return ResearchResponse(
             profile_id=profile.id,
             research_summary=summary,
-            transition_status=transition_status,
-            supporting_evidence=evidence,
-            uncertainties=uncertainties,
-            suggested_questions=questions,
-            outreach_draft=outreach,
+            transition_status=parsed.get("transition_status") or profile.transition_status,
+            supporting_evidence=_str_list(parsed.get("supporting_evidence")),
+            uncertainties=_str_list(parsed.get("uncertainties")),
+            suggested_questions=_str_list(parsed.get("suggested_questions")),
+            outreach_draft=parsed.get("outreach_draft") or "",
+            model=settings.LITELLM_MODEL,
+            custom_question=custom_question,
+            generated_at=datetime.now(timezone.utc).isoformat(),
         )
 
     @classmethod
@@ -188,30 +181,18 @@ Draft a concise, compelling message. Output JSON:
         with trace_span("outreach_generation", profile_id=profile.id, tone=tone):
             try:
                 raw_response = cls._call_model(prompt, system_prompt)
-                parsed = cls._parse_json_response(raw_response)
             except Exception as exc:
                 logger.error(f"Outreach generation error: {exc}")
-                parsed = {}
+                raise RuntimeError(f"The model call failed: {exc}") from exc
+            parsed = cls._parse_json_response(raw_response)
 
-        subject = parsed.get("subject") or f"Connecting with {profile.current_company or 'your new venture'} / ex-{recent_company}"
-        body = parsed.get("body") or (
-            f"Hi {first_name},\n\n"
-            f"I've been following career transitions of leaders emerging from {recent_company}, and your current work at "
-            f"{profile.current_company or 'your current startup'} immediately caught my attention.\n\n"
-            f"Given your background in {profile.current_title}, I would love to connect briefly to hear about your vision.\n\n"
-            f"Would you be open to a 15-minute introductory conversation next week?\n\n"
-            f"Best,\n[Your Name]"
-        )
-        grounded_points = parsed.get("grounded_points") or [
-            f"Referenced prior experience at {recent_company}",
-            f"Acknowledged current role as {profile.current_title}",
-            f"Based in {profile.location}"
-        ]
+        if not parsed.get("body"):
+            raise RuntimeError("The model returned no usable draft.")
 
         return OutreachDraftResponse(
             profile_id=profile.id,
-            subject=subject,
-            body=body,
+            subject=parsed.get("subject") or f"Hello from a Founder Radar user, {first_name}",
+            body=parsed["body"],
             tone=tone,
-            grounded_points=grounded_points,
+            grounded_points=[str(p) for p in parsed.get("grounded_points") or [] if p],
         )

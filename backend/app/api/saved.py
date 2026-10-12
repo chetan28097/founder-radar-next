@@ -4,6 +4,7 @@ from app.models.schemas import (
     SavedFounder, SavedFounderCreate, Watchlist, WatchlistCreate, NoteUpdateRequest
 )
 from app.repositories.saved_repository import SavedRepository
+from app.repositories.profile_repository import ResearchRepository
 from app.services.crustdata_service import CrustdataService
 
 router = APIRouter(prefix="/api", tags=["Watchlists & Saved Founders"])
@@ -11,8 +12,12 @@ router = APIRouter(prefix="/api", tags=["Watchlists & Saved Founders"])
 
 @router.get("/saved", response_model=List[SavedFounder])
 def list_saved_founders():
-    """List all saved founders stored in the local database."""
-    return SavedRepository.get_saved_founders()
+    """List all saved founders stored in the local database, with research status."""
+    founders = SavedRepository.get_saved_founders()
+    researched = ResearchRepository.researched_at_map([f.profile_id for f in founders])
+    for f in founders:
+        f.researched_at = researched.get(f.profile_id)
+    return founders
 
 
 @router.post("/saved", response_model=SavedFounder)

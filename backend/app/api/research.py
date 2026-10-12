@@ -6,6 +6,7 @@ from app.models.schemas import (
 from app.services.crustdata_service import CrustdataService
 from app.services.ai_service import AIService
 from app.repositories.saved_repository import SavedRepository
+from app.repositories.profile_repository import ResearchRepository
 from app.observability.tracer import trace_span
 
 router = APIRouter(prefix="/api/research", tags=["AI Research & Outreach"])
@@ -30,16 +31,28 @@ def analyze_founder_research(request: ResearchRequest):
                 )
 
         try:
-            return AIService.generate_dossier_research(
+            result = AIService.generate_dossier_research(
                 profile=profile,
                 custom_question=request.custom_question,
                 tone=request.tone,
             )
         except Exception as exc:
             raise HTTPException(
-                status_code=500,
-                detail=f"AI research synthesis failed: {str(exc)}"
+                status_code=502,
+                detail=f"AI research could not be generated: {str(exc)}"
             )
+
+        ResearchRepository.save(result)
+        return result
+
+
+@router.get("/{profile_id}", response_model=ResearchResponse)
+def get_latest_research(profile_id: str):
+    """Return the most recent saved research for a profile, if one was generated."""
+    result = ResearchRepository.get_latest(profile_id)
+    if not result:
+        raise HTTPException(status_code=404, detail="No research has been generated for this profile yet.")
+    return result
 
 
 @router.post("/outreach", response_model=OutreachDraftResponse)
@@ -68,6 +81,6 @@ def draft_personalized_outreach(request: OutreachDraftRequest):
             )
         except Exception as exc:
             raise HTTPException(
-                status_code=500,
-                detail=f"Outreach generation failed: {str(exc)}"
+                status_code=502,
+                detail=f"Outreach draft could not be generated: {str(exc)}"
             )
