@@ -10,27 +10,26 @@
  *    - Basic Profile (identity, titles, locations, photos)
  *    - Employment Details (partitioned current and past employment chronologies)
  *
- * 2. DETERMINISTIC TRANSITION SIGNALS:
+ * 2. DETERMINISTIC TRANSITION SIGNALS (founders only; shown as record-based labels):
  *    - 3-Tier Transition Status:
- *        * 'verified': Documented departure date from prior target employer +
- *          documented start date at new venture.
- *        * 'unverified': Plausible founder progression with partial/missing timestamps.
- *        * 'insufficient_evidence': Missing sequential evidence. Never infers startup
- *          creation solely from leaving an employer.
+ *        * 'verified' ("Dates on record"): a current role with an explicit founder
+ *          title and start date, plus a dated past role.
+ *        * 'unverified' ("Dates incomplete"): founder title present, dates missing.
+ *        * 'insufficient_evidence' ("Not enough data"): no founder title or no dated
+ *          history. Never infers startup creation solely from leaving an employer.
  *
- * 3. AI RESEARCH & INTELLIGENCE DOSSIER (Claude Sonnet 4.6 via LiteLLM):
- *    - Career Timeline Reconstruction
- *    - Fact-Grounded Synthesis vs. Uncertainties / Data Gaps separation
- *    - Recommended Diligence Questions
- *    - Human-in-the-Loop Editable Outreach Generation
+ * 3. SOURCED DOSSIER + ON-DEMAND AI RESEARCH (Claude Sonnet 4.6 via LiteLLM):
+ *    - LinkedIn URL, education and current-company facts kept from Crustdata
+ *    - Deterministic data gaps; AI research only on explicit request
+ *    - Facts relied on vs. what could not be established, plus diligence questions
+ *    - Optional human-in-the-loop introduction drafts (never sent by the app)
  *
  * 4. PERSISTENCE & WORKSPACE (SQLite):
- *    - Saved Founders & Custom Watchlists
- *    - Editable Research Notes
- *    - Recent Discovery Queries & Search History
+ *    - Saved Founders & Custom Watchlists, Editable Research Notes
+ *    - Recent searches, cached profiles and saved research results
  *
- * 5. SYSTEM HEALTH & TELEMETRY:
- *    - Real-time diagnostics for Crustdata, LiteLLM, Neatlogs OTLP, Entire CLI, and SQLite
+ * 5. SYSTEM HEALTH:
+ *    - Configuration checks for Crustdata, LiteLLM and Neatlogs; a live SQLite query
  * ============================================================================
  */
 
